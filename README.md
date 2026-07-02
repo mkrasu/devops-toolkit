@@ -15,6 +15,7 @@ frameworks, no config files to maintain, no vendor lock-in.
 |---|---|---|
 | [docker-cleanup](./docker-cleanup) | Safely prunes unused Docker containers, images, volumes, networks, and build cache — with dry-run mode and age-based filtering | Bash |
 | [k8s-resource-auditor](./k8s-resource-auditor) | Read-only cluster audit that flags pods missing resource limits, workloads missing readiness probes, and orphaned PVCs | Python 3 |
+| [log-tailer-alert](./log-tailer-alert) | Tails log files (or stdin), matches regex patterns, and fires threshold-based alerts to Slack, Discord, webhook, or email | Python 3 |
 
 More tools are added as they're built — see the roadmap below.
 
@@ -37,12 +38,16 @@ Every tool in this repo follows the same rules:
 ```
 devops-toolkit/
 ├── LICENSE                    # MIT, applies to the whole repo
-├── README.md                  # you are here
+├── README.md
 ├── docker-cleanup/
 │   ├── docker-cleanup.sh
 │   └── README.md
-└── k8s-resource-auditor/
-    ├── k8s-audit.py
+├── k8s-resource-auditor/
+│   ├── k8s-audit.py
+│   └── README.md
+└── log-tailer-alert/
+    ├── log-alert.py
+    ├── example.config.json
     └── README.md
 ```
 
@@ -53,7 +58,6 @@ Planned additions:
 - CI/CD pipeline templates (GitHub Actions) for common stacks
 - Database backup + rotation tool with S3 upload and restore verification
 - Uptime/health-check dashboard for a list of endpoints
-- Log tailer with pattern-based alerting
 
 ## Usage
 

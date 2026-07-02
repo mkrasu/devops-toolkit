@@ -1,0 +1,39 @@
+{
+  "files": ["/var/log/app.log"],
+  "patterns": [
+    {
+      "name": "http-5xx",
+      "regex": "\\s5\\d{2}\\s",
+      "severity": "high",
+      "threshold": 3,
+      "window_seconds": 60,
+      "cooldown_seconds": 300
+    },
+    {
+      "name": "oom-killer",
+      "regex": "Out of memory|OOM",
+      "severity": "high",
+      "threshold": 1,
+      "window_seconds": 60,
+      "cooldown_seconds": 600
+    },
+    {
+      "name": "auth-failure",
+      "regex": "authentication failure|Failed password",
+      "severity": "medium",
+      "threshold": 5,
+      "window_seconds": 120,
+      "cooldown_seconds": 300
+    }
+  ],
+  "notifiers": {
+    "slack": {
+      "enabled": false,
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    },
+    "webhook": {
+      "enabled": false,
+      "url": "https://example.com/hooks/log-alert"
+    }
+  }
+}
