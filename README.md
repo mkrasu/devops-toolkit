@@ -1,8 +1,8 @@
 # devops-toolkit
 
 A collection of practical DevOps and SysAdmin scripts for automating daily
-maintenance — Docker cleanup, Kubernetes hygiene audits, backups,
-monitoring, and more.
+maintenance — Docker cleanup, Kubernetes hygiene audits, log-based
+alerting, dev machine provisioning, and more.
 
 Each tool lives in its own folder, is self-contained, and comes with its
 own README covering usage, requirements, and examples. Nothing here needs
@@ -16,6 +16,7 @@ frameworks, no config files to maintain, no vendor lock-in.
 | [docker-cleanup](./docker-cleanup) | Safely prunes unused Docker containers, images, volumes, networks, and build cache — with dry-run mode and age-based filtering | Bash |
 | [k8s-resource-auditor](./k8s-resource-auditor) | Read-only cluster audit that flags pods missing resource limits, workloads missing readiness probes, and orphaned PVCs | Python 3 |
 | [log-tailer-alert](./log-tailer-alert) | Tails log files (or stdin), matches regex patterns, and fires threshold-based alerts to Slack, Discord, webhook, or email | Python 3 |
+| [dotfiles-bootstrap](./dotfiles-bootstrap) | Provisions a fresh dev machine: installs common CLI tools and safely symlinks starter dotfiles, with backup and idempotent re-runs | Bash |
 
 More tools are added as they're built — see the roadmap below.
 
@@ -38,16 +39,21 @@ Every tool in this repo follows the same rules:
 ```
 devops-toolkit/
 ├── LICENSE                    # MIT, applies to the whole repo
-├── README.md
+├── README.md                  # you are here
 ├── docker-cleanup/
 │   ├── docker-cleanup.sh
 │   └── README.md
 ├── k8s-resource-auditor/
 │   ├── k8s-audit.py
 │   └── README.md
-└── log-tailer-alert/
-    ├── log-alert.py
-    ├── example.config.json
+├── log-tailer-alert/
+│   ├── log-alert.py
+│   ├── example.config.json
+│   └── README.md
+└── dotfiles-bootstrap/
+    ├── bootstrap.sh
+    ├── dotfiles/
+    ├── packages/
     └── README.md
 ```
 
@@ -61,13 +67,14 @@ Planned additions:
 
 ## Usage
 
-Clone the repo and use whichever tool you need directly — they don't
-depend on each other:
+Clone the repo, then `cd` into whichever tool you need — they're
+self-contained and don't depend on each other. Each tool's own README
+covers its exact usage, options, and requirements.
 
 ```bash
 git clone https://github.com/mkrasu/devops-toolkit.git
-cd devops-toolkit/docker-cleanup
-./docker-cleanup.sh --dry-run
+cd devops-toolkit/<tool-name>
+cat README.md
 ```
 
 ## Contributing

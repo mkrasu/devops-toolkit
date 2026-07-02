@@ -1,0 +1,14 @@
+# Packages installed via Homebrew on macOS.
+# One package per line. Lines starting with # are ignored.
+
+git
+curl
+wget
+vim
+tmux
+htop
+jq
+ripgrep
+fzf
+bat
+tree

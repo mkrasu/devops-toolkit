@@ -1,0 +1,44 @@
+# ~/.gitconfig — starter config linked by bootstrap.sh
+#
+# Identity (name/email) is intentionally NOT set here — put it in
+# ~/.gitconfig.local instead, so this file stays generic and shareable.
+# ~/.gitconfig.local example:
+#   [user]
+#       name = Your Name
+#       email = you@example.com
+
+[include]
+    path = ~/.gitconfig.local
+
+[init]
+    defaultBranch = main
+
+[core]
+    editor = vim
+    autocrlf = input
+    excludesfile = ~/.gitignore_global
+
+[pull]
+    rebase = false
+
+[push]
+    autoSetupRemote = true
+
+[color]
+    ui = auto
+
+[alias]
+    st = status
+    co = checkout
+    br = branch
+    ci = commit
+    lg = log --oneline --graph --decorate --all
+    last = log -1 HEAD
+    unstage = reset HEAD --
+    amend = commit --amend --no-edit
+
+[merge]
+    conflictstyle = diff3
+
+[diff]
+    colorMoved = default

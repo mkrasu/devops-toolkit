@@ -1,0 +1,15 @@
+# Packages installed via dnf on Fedora/RHEL-family systems.
+# One package per line. Lines starting with # are ignored.
+
+git
+curl
+wget
+vim
+tmux
+htop
+jq
+ripgrep
+fzf
+bat
+tree
+unzip

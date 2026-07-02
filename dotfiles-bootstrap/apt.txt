@@ -1,0 +1,16 @@
+# Packages installed via apt on Debian/Ubuntu.
+# One package per line. Lines starting with # are ignored.
+
+git
+curl
+wget
+vim
+tmux
+htop
+jq
+ripgrep
+fzf
+bat
+tree
+unzip
+build-essential
