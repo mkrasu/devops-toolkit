@@ -79,6 +79,7 @@ real package availability there:
 |---|---|
 | `.bashrc` | Sane history settings, a git-branch-aware prompt, common aliases, `EDITOR`/`VISUAL`, optional fzf key bindings |
 | `.gitconfig` | Useful aliases (`git st`, `git lg`, ...), sane defaults (`init.defaultBranch=main`, `pull.rebase=false`). Identity (name/email) is deliberately **not** set here — see below |
+| `.gitignore_global` | Global ignore patterns (OS junk, editor swap files, `.env`, `node_modules/`, ...), wired up via `core.excludesfile` in `.gitconfig` |
 | `.vimrc` | Line numbers, sane search/indent defaults, persistent undo, no swap/backup file clutter |
 | `.tmux.conf` | Mouse support, vim-style pane navigation, `Ctrl-a` prefix, sensible status bar |
 

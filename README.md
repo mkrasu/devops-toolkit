@@ -1,45 +1,42 @@
 # devops-toolkit
 
-A collection of practical DevOps and SysAdmin scripts for automating daily
-maintenance — Docker cleanup, Kubernetes hygiene audits, log-based
-alerting, dev machine provisioning, and more.
+Small, self-contained scripts I keep reaching for when I'm doing ops work —
+cleaning up after Docker, sanity-checking a Kubernetes cluster, watching logs,
+or setting up a fresh machine. Nothing fancy and no frameworks; just the things
+that saved me enough time that I bothered to tidy them up and keep them in one
+place.
 
-Each tool lives in its own folder, is self-contained, and comes with its
-own README covering usage, requirements, and examples. Nothing here needs
-more than a shell, `kubectl`, or a stock Python 3 install — no heavyweight
-frameworks, no config files to maintain, no vendor lock-in.
+Each tool lives in its own folder with its own README, and none of them depend
+on each other. If you only want one, copy that folder out and use it on its own.
 
-## Tools
+## What's in here
 
-| Tool | Description | Language |
+| Tool | What it does | Language |
 |---|---|---|
-| [docker-cleanup](./docker-cleanup) | Safely prunes unused Docker containers, images, volumes, networks, and build cache — with dry-run mode and age-based filtering | Bash |
-| [k8s-resource-auditor](./k8s-resource-auditor) | Read-only cluster audit that flags pods missing resource limits, workloads missing readiness probes, and orphaned PVCs | Python 3 |
-| [log-tailer-alert](./log-tailer-alert) | Tails log files (or stdin), matches regex patterns, and fires threshold-based alerts to Slack, Discord, webhook, or email | Python 3 |
-| [dotfiles-bootstrap](./dotfiles-bootstrap) | Provisions a fresh dev machine: installs common CLI tools and safely symlinks starter dotfiles, with backup and idempotent re-runs | Bash |
+| [docker-cleanup](./docker-cleanup) | Prunes stale Docker containers, images, volumes, networks, and build cache — with a real dry-run preview and an age cutoff so it doesn't touch anything recent | Bash |
+| [k8s-resource-auditor](./k8s-resource-auditor) | Read-only pass over a cluster that flags pods with no resource limits, workloads with no readiness probes, and PVCs nothing is using | Python 3 |
+| [log-tailer-alert](./log-tailer-alert) | Follows log files (or stdin), matches regex patterns, and alerts to Slack/Discord/webhook/email once a pattern trips a threshold | Python 3 |
+| [dotfiles-bootstrap](./dotfiles-bootstrap) | Sets up a new dev box: installs my usual CLI tools and symlinks starter dotfiles, backing up anything already there | Bash |
 
-More tools are added as they're built — see the roadmap below.
+## How they're built
 
-## Design principles
+A few things I tried to keep consistent across all of them:
 
-Every tool in this repo follows the same rules:
+- They don't need anything exotic — a shell, `kubectl`, or a stock Python 3 is
+  enough. No `pip install`, no extra runtime.
+- Anything that deletes is opt-in and has a `--dry-run`. I've removed the wrong
+  thing before and didn't enjoy it, so the destructive flags are never the
+  default.
+- They behave in scripts and cron: real exit codes, JSON output where it's
+  useful, and no surprise prompts when nothing's attached to a terminal.
+- Each one has a README that explains why it exists, not just how to run it.
 
-- **Minimal dependencies** — standard shell tools or the Python standard
-  library only, unless a task genuinely needs more.
-- **Safe by default** — destructive actions require an explicit flag
-  (`--all`, `-y`, etc.) or a `--dry-run` mode to preview first.
-- **Scriptable / CI-friendly** — sensible exit codes, machine-readable
-  output modes (JSON) where relevant, and no interactive prompts required
-  when run non-interactively.
-- **Documented** — every tool ships with its own README: what it does,
-  why it exists, how to run it, and what permissions it needs.
-
-## Repository structure
+## Layout
 
 ```
 devops-toolkit/
-├── LICENSE                    # MIT, applies to the whole repo
-├── README.md                  # you are here
+├── LICENSE                     # MIT, covers the whole repo
+├── README.md                   # this file
 ├── docker-cleanup/
 │   ├── docker-cleanup.sh
 │   └── README.md
@@ -52,24 +49,15 @@ devops-toolkit/
 │   └── README.md
 └── dotfiles-bootstrap/
     ├── bootstrap.sh
-    ├── dotfiles/
-    ├── packages/
+    ├── dotfiles/                # .bashrc .gitconfig .gitignore_global .vimrc .tmux.conf
+    ├── packages/                # apt.txt dnf.txt pacman.txt brew.txt
     └── README.md
 ```
 
-## Roadmap
+## Using them
 
-Planned additions:
-
-- CI/CD pipeline templates (GitHub Actions) for common stacks
-- Database backup + rotation tool with S3 upload and restore verification
-- Uptime/health-check dashboard for a list of endpoints
-
-## Usage
-
-Clone the repo, then `cd` into whichever tool you need — they're
-self-contained and don't depend on each other. Each tool's own README
-covers its exact usage, options, and requirements.
+Clone the repo and `cd` into whichever tool you need — each folder's README has
+the exact options and requirements.
 
 ```bash
 git clone https://github.com/mkrasu/devops-toolkit.git
@@ -77,12 +65,19 @@ cd devops-toolkit/<tool-name>
 cat README.md
 ```
 
+## On the list
+
+Things I'll probably add when I hit the need again:
+
+- GitHub Actions templates for the stacks I use most
+- A database backup + rotation script with S3 upload and a restore check
+- A simple uptime/health-check dashboard for a list of endpoints
+
 ## Contributing
 
-This is primarily a personal toolkit, but issues and PRs are welcome —
-bug reports, edge cases, or small tools that fit the same design
-principles above.
+This is mostly my own toolkit, but if you spot a bug, hit an edge case, or have
+a small script that fits the same spirit, issues and PRs are welcome.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE). Applies to every tool in this repository.
+MIT — see [LICENSE](./LICENSE). Applies to everything in the repo.

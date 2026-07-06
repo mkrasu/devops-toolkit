@@ -29,6 +29,7 @@
   "notifiers": {
     "slack": {
       "enabled": false,
+      "min_severity": "high",
       "webhook_url": "${SLACK_WEBHOOK_URL}"
     },
     "webhook": {

@@ -31,6 +31,12 @@ Examples:
     # Only check for missing resource limits/requests, output JSON for CI
     python3 k8s-audit.py -A --checks resources --output json
 
+    # Audit all namespaces but skip the noisy system ones
+    python3 k8s-audit.py -A --exclude-namespace kube-system --exclude-namespace kube-public
+
+    # Scope to your own workloads with a label selector
+    python3 k8s-audit.py -A -l app=web
+
     # Fail the CI job if anything HIGH severity is found
     python3 k8s-audit.py -A --fail-on high
 """
@@ -88,30 +94,56 @@ class AuditResult:
 # kubectl wrapper
 # ---------------------------------------------------------------------------
 
-def run_kubectl(args: list[str], context: str | None) -> dict[str, Any]:
+class KubectlError(Exception):
+    """A recoverable kubectl failure (e.g. RBAC denial for one resource)."""
+
+
+def run_kubectl(args: list[str], context: str | None, selector: str | None = None) -> dict[str, Any]:
     cmd = ["kubectl"]
     if context:
         cmd += ["--context", context]
-    cmd += args + ["-o", "json"]
+    cmd += args
+    if selector:
+        cmd += ["-l", selector]
+    cmd += ["-o", "json"]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
     except FileNotFoundError:
+        # kubectl itself missing is fatal — nothing will work.
         die("kubectl is not installed or not on PATH.")
     except subprocess.TimeoutExpired:
-        die(f"kubectl command timed out: {' '.join(cmd)}")
+        raise KubectlError(f"timed out: {' '.join(cmd)}")
 
     if proc.returncode != 0:
-        die(f"kubectl command failed: {' '.join(cmd)}\n{proc.stderr.strip()}")
+        raise KubectlError(proc.stderr.strip() or f"exit {proc.returncode}")
 
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:
-        die(f"Failed to parse kubectl JSON output for: {' '.join(cmd)}")
+        raise KubectlError(f"could not parse JSON from: {' '.join(cmd)}")
 
 
 def die(msg: str) -> None:
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(2)
+
+
+def warn(msg: str) -> None:
+    print(f"Warning: {msg}", file=sys.stderr)
+
+
+def current_namespace(context: str | None) -> str:
+    """Best-effort resolve the namespace of the active kubeconfig context."""
+    try:
+        cmd = ["kubectl"]
+        if context:
+            cmd += ["--context", context]
+        cmd += ["config", "view", "--minify", "-o", "jsonpath={..namespace}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=15)
+        ns = proc.stdout.strip()
+        return ns or "default"
+    except Exception:
+        return "default"
 
 
 def ns_args(namespace: str | None, all_namespaces: bool) -> list[str]:
@@ -126,9 +158,31 @@ def ns_args(namespace: str | None, all_namespaces: bool) -> list[str]:
 # Fetchers
 # ---------------------------------------------------------------------------
 
-def fetch(kind: str, namespace: str | None, all_namespaces: bool, context: str | None) -> list[dict]:
-    data = run_kubectl(["get", kind] + ns_args(namespace, all_namespaces), context)
-    return data.get("items", [])
+def fetch(
+    kind: str,
+    namespace: str | None,
+    all_namespaces: bool,
+    context: str | None,
+    selector: str | None = None,
+    exclude_namespaces: set[str] | None = None,
+    failures: list[str] | None = None,
+) -> list[dict]:
+    """Fetch resources of `kind`. On a recoverable kubectl error (e.g. the token
+    can read pods but not PVCs), warn and return [] instead of aborting the run."""
+    try:
+        data = run_kubectl(["get", kind] + ns_args(namespace, all_namespaces), context, selector)
+    except KubectlError as e:
+        warn(f"could not fetch '{kind}': {e}. Skipping this resource.")
+        if failures is not None:
+            failures.append(kind)
+        return []
+    items = data.get("items", [])
+    if exclude_namespaces:
+        items = [
+            it for it in items
+            if it.get("metadata", {}).get("namespace") not in exclude_namespaces
+        ]
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +272,12 @@ def check_liveness_probes(workloads: list[tuple[str, dict]]) -> list[Finding]:
     return findings
 
 
+def image_tag(image: str) -> str:
+    """Extract the tag from an image ref, treating an untagged image as ':latest'.
+    Handles registries with a port (e.g. 'registry:5000/app' -> latest)."""
+    return image.rsplit(":", 1)[-1] if ":" in image.rsplit("/", 1)[-1] else "latest"
+
+
 def check_latest_tag(workloads: list[tuple[str, dict]]) -> list[Finding]:
     findings = []
     for kind, wl in workloads:
@@ -226,8 +286,7 @@ def check_latest_tag(workloads: list[tuple[str, dict]]) -> list[Finding]:
         template = wl.get("spec", {}).get("template", {}).get("spec", {})
         for c in template.get("containers", []):
             image = c.get("image", "")
-            tag = image.rsplit(":", 1)[-1] if ":" in image.rsplit("/", 1)[-1] else "latest"
-            if tag == "latest":
+            if image_tag(image) == "latest":
                 findings.append(Finding(
                     severity="low",
                     check="latest-tag",
@@ -236,6 +295,32 @@ def check_latest_tag(workloads: list[tuple[str, dict]]) -> list[Finding]:
                     name=name,
                     container=c["name"],
                     message=f"Image '{image}' uses the ':latest' tag (not pinned)",
+                ))
+    return findings
+
+
+def check_pull_policy(workloads: list[tuple[str, dict]]) -> list[Finding]:
+    """Flag a pinned image (not ':latest') set to imagePullPolicy: Always — it
+    forces a registry round-trip on every pod start for an image that can't
+    change under that tag. (Untagged/':latest' images are covered by latest-tag.)"""
+    findings = []
+    for kind, wl in workloads:
+        ns = wl["metadata"]["namespace"]
+        name = wl["metadata"]["name"]
+        template = wl.get("spec", {}).get("template", {}).get("spec", {})
+        for c in template.get("containers", []):
+            image = c.get("image", "")
+            if image_tag(image) == "latest":
+                continue
+            if c.get("imagePullPolicy") == "Always":
+                findings.append(Finding(
+                    severity="low",
+                    check="pull-policy",
+                    kind=kind,
+                    namespace=ns,
+                    name=name,
+                    container=c["name"],
+                    message=f"Pinned image '{image}' has imagePullPolicy: Always (pulls on every start)",
                 ))
     return findings
 
@@ -292,6 +377,7 @@ CHECK_REGISTRY = {
     "readiness-probes": "Missing readiness probes",
     "liveness-probes": "Missing liveness probes",
     "latest-tag": "Container images pinned to :latest",
+    "pull-policy": "Pinned images with imagePullPolicy: Always",
     "single-replica": "Deployments running with replicas=1",
     "orphaned-pvcs": "PVCs not mounted by any pod",
 }
@@ -394,6 +480,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     scope.add_argument("-A", "--all-namespaces", action="store_true", help="Audit all namespaces")
     p.add_argument("--context", help="kubeconfig context to use (default: current context)")
     p.add_argument(
+        "--exclude-namespace",
+        action="append",
+        default=[],
+        metavar="NS",
+        help="Namespace to skip (repeatable). Handy for -A runs to drop kube-system etc.",
+    )
+    p.add_argument(
+        "-l", "--selector",
+        help="Label selector passed to kubectl (e.g. 'app=web,tier!=cache')",
+    )
+    p.add_argument(
         "--checks",
         default="all",
         help=f"Comma-separated checks to run: {', '.join(DEFAULT_CHECKS)} (default: all)",
@@ -412,7 +509,8 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     if not args.namespace and not args.all_namespaces:
-        print("Note: no --namespace/-n or --all-namespaces/-A given, defaulting to current namespace.\n", file=sys.stderr)
+        ns = current_namespace(args.context)
+        print(f"Note: no --namespace/-n or --all-namespaces/-A given, auditing current namespace '{ns}'.\n", file=sys.stderr)
 
     checks = DEFAULT_CHECKS if args.checks == "all" else [c.strip() for c in args.checks.split(",")]
     unknown = set(checks) - set(CHECK_REGISTRY)
@@ -420,16 +518,24 @@ def main(argv: list[str]) -> int:
         die(f"Unknown check(s): {', '.join(sorted(unknown))}. Valid: {', '.join(DEFAULT_CHECKS)}")
 
     result = AuditResult()
+    exclude = set(args.exclude_namespace)
+    failures: list[str] = []
+
+    def _fetch(kind: str) -> list[dict]:
+        return fetch(
+            kind, args.namespace, args.all_namespaces, args.context,
+            selector=args.selector, exclude_namespaces=exclude, failures=failures,
+        )
 
     needs_pods = {"resources", "orphaned-pvcs"} & set(checks)
-    needs_workloads = {"readiness-probes", "liveness-probes", "latest-tag", "single-replica"} & set(checks)
+    needs_workloads = {"readiness-probes", "liveness-probes", "latest-tag", "pull-policy", "single-replica"} & set(checks)
     needs_pvcs = "orphaned-pvcs" in checks
 
-    pods = fetch("pods", args.namespace, args.all_namespaces, args.context) if needs_pods else []
-    deployments = fetch("deployments", args.namespace, args.all_namespaces, args.context) if needs_workloads else []
-    statefulsets = fetch("statefulsets", args.namespace, args.all_namespaces, args.context) if needs_workloads else []
-    daemonsets = fetch("daemonsets", args.namespace, args.all_namespaces, args.context) if needs_workloads else []
-    pvcs = fetch("pvc", args.namespace, args.all_namespaces, args.context) if needs_pvcs else []
+    pods = _fetch("pods") if needs_pods else []
+    deployments = _fetch("deployments") if needs_workloads else []
+    statefulsets = _fetch("statefulsets") if needs_workloads else []
+    daemonsets = _fetch("daemonsets") if needs_workloads else []
+    pvcs = _fetch("pvc") if needs_pvcs else []
 
     result.resources_scanned = {
         "pods": len(pods),
@@ -453,6 +559,8 @@ def main(argv: list[str]) -> int:
         result.add(*check_liveness_probes(workloads))
     if "latest-tag" in checks:
         result.add(*check_latest_tag(workloads))
+    if "pull-policy" in checks:
+        result.add(*check_pull_policy(workloads))
     if "single-replica" in checks:
         result.add(*check_single_replica(deployments))
     if "orphaned-pvcs" in checks:
@@ -460,6 +568,12 @@ def main(argv: list[str]) -> int:
 
     renderer = {"table": render_table, "json": render_json, "markdown": render_markdown}[args.output]
     print(renderer(result))
+
+    if failures:
+        warn(
+            f"some resources could not be read ({', '.join(failures)}); "
+            "results may be incomplete. Check RBAC for the current context."
+        )
 
     if args.fail_on != "none":
         threshold = SEVERITY_ORDER[args.fail_on]

@@ -15,13 +15,22 @@ gap for local dev machines, CI runners, and small self-hosted servers.
 
 ## Features
 
-- **Dry-run mode** — see exactly what would be removed before committing
+- **Dry-run mode** — lists the actual candidate resources (stopped containers,
+  dangling images, unused networks/volumes, build cache) before you commit
 - **Age-based filtering** — only touch resources older than N days (default: 7)
 - **Opt-in destructive actions** — volume and full image pruning require
   explicit flags, since they can delete real data
 - **Confirmation prompt** — unless `--yes` is passed
+- **Reclaimed-space summary** — reports roughly how much disk each run freed
+- **JSON output** (`--json`) for piping the summary into other tooling
 - **Before/after disk usage report** via `docker system df`
 - **Optional logging** to a file (e.g. for cron jobs)
+
+> On the dry run: Docker's prune age filter (`until=`) is a *relative* age that
+> `docker ... ls` can't reproduce exactly, so the preview shows the current
+> candidates of each type; the real run additionally drops anything newer than
+> the threshold. It's an honest preview of what kind of thing goes, not a
+> byte-exact promise.
 
 ## Requirements
 
@@ -42,6 +51,9 @@ chmod +x docker-cleanup.sh
 
 # Full cleanup including volumes, images, and build cache, with a log file
 ./docker-cleanup.sh --all --yes --log /var/log/docker-cleanup.log
+
+# Preview as JSON, e.g. to feed a dashboard or another script
+./docker-cleanup.sh --dry-run --json
 ```
 
 ### Options
@@ -55,6 +67,7 @@ chmod +x docker-cleanup.sh
 | `-i, --images` | Also prune all unused images, not just dangling ones |
 | `-b, --build-cache` | Also prune the builder cache |
 | `-a, --all` | Shorthand for `-v -i -b` |
+| `-j, --json` | Print a machine-readable JSON summary (implies `--quiet`) |
 | `-l, --log FILE` | Write a plain-text summary log to FILE |
 | `-q, --quiet` | Suppress non-essential console output |
 | `-h, --help` | Show usage |
@@ -103,6 +116,9 @@ sudo systemctl enable --now docker-cleanup.timer
 - Volume pruning (`-v`) removes **dangling** volumes only (not attached to
   any container), but if you rely on ad-hoc `docker run -v` workflows
   without naming volumes, double-check with `docker volume ls` first.
+- The age filter (`--days`) does **not** apply to volumes — `docker volume
+  prune` has no age filter, so `-v` removes all dangling volumes regardless of
+  age. The script prints a reminder when volume pruning runs.
 - Always run `--dry-run` first on a machine you're unfamiliar with.
 - This script never touches running containers or images backing them.
 

@@ -40,6 +40,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -64,6 +65,9 @@ COLORS = {
     "high": "\033[31m",     # red
     "reset": "\033[0m",
 }
+
+# Higher number = more severe. Used for per-notifier severity floors.
+SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 
 def colorize(text: str, severity: str) -> str:
@@ -195,14 +199,20 @@ class Alert:
 # Notifiers
 # ---------------------------------------------------------------------------
 
-def http_post_json(url: str, payload: dict, timeout: int = 10) -> None:
+def http_post_json(url: str, payload: dict, timeout: int = 10, retries: int = 2) -> None:
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            resp.read()
-    except Exception as e:
-        log(f"Notifier error (HTTP POST to {url}): {e}")
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                resp.read()
+            return
+        except Exception as e:  # transient network/HTTP error — retry with backoff
+            last_err = e
+            if attempt < retries:
+                time.sleep(2 ** attempt)  # 1s, 2s, ...
+    log(f"Notifier error (HTTP POST to {url}) after {retries + 1} attempt(s): {last_err}")
 
 
 def notify_slack(cfg: dict, alert: Alert) -> None:
@@ -226,19 +236,32 @@ def notify_webhook(cfg: dict, alert: Alert) -> None:
 
 
 def notify_email(cfg: dict, alert: Alert) -> None:
+    username = cfg.get("username")
+    password = cfg.get("password")
+    if username and not password:
+        log("Notifier error (email): 'username' set but 'password' missing in config.")
+        return
+
     msg = MIMEText(alert.text())
     msg["Subject"] = f"[log-alert] {alert.severity.upper()}: {alert.pattern}"
     msg["From"] = cfg["from_addr"]
     msg["To"] = ", ".join(cfg["to_addrs"])
-    try:
-        with smtplib.SMTP(cfg["smtp_host"], cfg.get("smtp_port", 587), timeout=10) as server:
-            if cfg.get("use_tls", True):
-                server.starttls()
-            if cfg.get("username"):
-                server.login(cfg["username"], cfg["password"])
-            server.sendmail(cfg["from_addr"], cfg["to_addrs"], msg.as_string())
-    except Exception as e:
-        log(f"Notifier error (email): {e}")
+
+    last_err: Exception | None = None
+    for attempt in range(3):  # 1 try + 2 retries
+        try:
+            with smtplib.SMTP(cfg["smtp_host"], cfg.get("smtp_port", 587), timeout=10) as server:
+                if cfg.get("use_tls", True):
+                    server.starttls()
+                if username:
+                    server.login(username, password)
+                server.sendmail(cfg["from_addr"], cfg["to_addrs"], msg.as_string())
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    log(f"Notifier error (email) after 3 attempt(s): {last_err}")
 
 
 NOTIFIER_DISPATCH = {
@@ -259,6 +282,11 @@ def dispatch_alert(alert: Alert, notifiers_cfg: dict, dry_run: bool) -> None:
 
     for name, cfg in notifiers_cfg.items():
         if not cfg.get("enabled", True):
+            continue
+        # Optional per-notifier severity floor: e.g. page Slack on "high" only
+        # while email gets everything.
+        floor = cfg.get("min_severity")
+        if floor and SEVERITY_ORDER.get(alert.severity, 0) < SEVERITY_ORDER.get(floor, 0):
             continue
         fn = NOTIFIER_DISPATCH.get(name)
         if fn is None:
@@ -335,6 +363,102 @@ def replay_file(path: str, patterns: list[Pattern], notifiers_cfg: dict, dry_run
 
 
 # ---------------------------------------------------------------------------
+# --once mode: read only what's new since last run, tracking position on disk
+# so cron invocations don't miss lines (or re-read the whole file every time).
+# ---------------------------------------------------------------------------
+
+def default_state_dir() -> str:
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "log-alert")
+
+
+def _state_path(state_dir: str, path: str) -> str:
+    key = hashlib.sha1(os.path.abspath(path).encode("utf-8")).hexdigest()
+    return os.path.join(state_dir, f"{key}.json")
+
+
+def _load_state(state_dir: str, path: str) -> dict:
+    try:
+        with open(_state_path(state_dir, path), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_state(state_dir: str, path: str, inode: int, offset: int) -> None:
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(_state_path(state_dir, path), "w", encoding="utf-8") as f:
+            json.dump({"inode": inode, "offset": offset}, f)
+    except OSError as e:
+        log(f"Warning: could not save state for {path}: {e}")
+
+
+def process_once(
+    path: str,
+    patterns: list[Pattern],
+    notifiers_cfg: dict,
+    dry_run: bool,
+    from_start: bool,
+    state_dir: str,
+) -> tuple[int, int]:
+    """Read new content in `path` since the last run and dispatch alerts.
+    Returns (lines_processed, alerts_fired)."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        log(f"File not found, skipping: {path}")
+        return (0, 0)
+
+    state = _load_state(state_dir, path)
+    start = 0
+    if state and state.get("inode") == st.st_ino and state.get("offset", 0) <= st.st_size:
+        # Same file as last time, not truncated — resume where we left off.
+        start = state.get("offset", 0)
+    elif not state and not from_start:
+        # First time we've seen this file and the user didn't ask to read it
+        # from the beginning — establish a baseline at EOF, alert on nothing yet.
+        start = st.st_size
+    # Otherwise (rotation/truncation, or first run with --from-start): start at 0.
+
+    processed = 0
+    fired = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        f.seek(start)
+        for line in f:
+            processed += 1
+            now = time.time()
+            for p in patterns:
+                alert = p.check(line, path, now)
+                if alert:
+                    fired += 1
+                    dispatch_alert(alert, notifiers_cfg, dry_run)
+        end = f.tell()
+
+    _save_state(state_dir, path, st.st_ino, end)
+    return (processed, fired)
+
+
+def run_once(
+    files: list[str],
+    patterns: list[Pattern],
+    notifiers_cfg: dict,
+    dry_run: bool,
+    from_start: bool,
+    state_dir: str,
+) -> int:
+    total_lines = 0
+    for path in files:
+        if path == "-":
+            log("--once does not support stdin ('-'); skipping.")
+            continue
+        lines, _ = process_once(path, patterns, notifiers_cfg, dry_run, from_start, state_dir)
+        total_lines += lines
+    log(f"Processed {total_lines} new line(s) across {len(files)} file(s). Exiting.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -346,9 +470,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--config", required=True, help="Path to JSON config file")
     p.add_argument("--file", action="append", help="Override file(s) to watch (repeatable). Use '-' for stdin.")
     p.add_argument("--dry-run", action="store_true", help="Print alerts but don't send notifications")
-    p.add_argument("--once", action="store_true", help="Process currently-available new lines, then exit (no follow)")
+    p.add_argument("--once", action="store_true", help="Process new lines since the last run, then exit (cron-friendly; tracks file position on disk)")
     p.add_argument("--test", metavar="FILE", help="Replay FILE from the start against the patterns, print a summary, and exit")
-    p.add_argument("--from-start", action="store_true", help="In live mode, read existing file content instead of only new lines")
+    p.add_argument("--from-start", action="store_true", help="Read existing file content instead of only new lines (live mode, or first --once run)")
+    p.add_argument("--state-dir", help="Where --once stores per-file position state (default: $XDG_CACHE_HOME/log-alert or ~/.cache/log-alert)")
     return p.parse_args(argv)
 
 
@@ -370,6 +495,10 @@ def main(argv: list[str]) -> int:
     files = args.file or config.get("files", [])
     if not files:
         die("No files to watch. Set 'files' in the config or pass --file.")
+
+    if args.once:
+        state_dir = args.state_dir or config.get("state_dir") or default_state_dir()
+        return run_once(files, patterns, notifiers_cfg, args.dry_run, args.from_start, state_dir)
 
     stop_event = threading.Event()
     out_queue: Queue = Queue()
@@ -395,15 +524,12 @@ def main(argv: list[str]) -> int:
     signal.signal(signal.SIGINT, handle_sigint)
     signal.signal(signal.SIGTERM, handle_sigint)
 
-    start_time = time.time()
     processed = 0
     try:
         while not stop_event.is_set():
             try:
                 line, source = out_queue.get(timeout=0.5)
             except Empty:
-                if args.once and time.time() - start_time > 1.0:
-                    break
                 continue
 
             processed += 1

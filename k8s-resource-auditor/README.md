@@ -21,6 +21,7 @@ pass so you can fix them before they page you.
 | `orphaned-pvcs` | HIGH (Bound) / MEDIUM (Pending) | PVCs not referenced by any pod's volumes |
 | `liveness-probes` | LOW | Containers with no `livenessProbe` |
 | `latest-tag` | LOW | Containers using the `:latest` image tag instead of a pinned version |
+| `pull-policy` | LOW | Pinned images (not `:latest`) set to `imagePullPolicy: Always`, forcing a registry pull on every start |
 | `single-replica` | LOW | Deployments running with `replicas: 1` |
 
 Each check can be run independently via `--checks`.
@@ -50,6 +51,12 @@ chmod +x k8s-audit.py
 # Run two specific checks
 ./k8s-audit.py -A --checks resources,orphaned-pvcs
 
+# Audit all namespaces but skip the noisy system ones
+./k8s-audit.py -A --exclude-namespace kube-system --exclude-namespace kube-public
+
+# Scope to your own workloads with a label selector
+./k8s-audit.py -A -l app=web
+
 # JSON output (for piping into other tools / CI artifacts)
 ./k8s-audit.py -A --output json > audit-report.json
 
@@ -70,6 +77,8 @@ chmod +x k8s-audit.py
 | `-n, --namespace NS` | Audit a single namespace |
 | `-A, --all-namespaces` | Audit all namespaces |
 | `--context CTX` | kubeconfig context to use (default: current context) |
+| `--exclude-namespace NS` | Namespace to skip; repeatable (e.g. drop `kube-system` on an `-A` run) |
+| `-l, --selector SEL` | Label selector passed to kubectl (e.g. `app=web,tier!=cache`) |
 | `--checks LIST` | Comma-separated list of checks to run (default: all — see table above) |
 | `--output {table,json,markdown}` | Output format (default: table) |
 | `--fail-on {high,medium,low,none}` | Exit code 1 if a finding at/above this severity exists (default: none) |
@@ -125,8 +134,16 @@ rules:
     verbs: ["get", "list"]
 ```
 
-## Limitations
+## Behavior notes & limitations
 
+- **Partial RBAC is tolerated.** If the current context can read some resources
+  but not others (say, pods but not PVCs), the tool warns on stderr, skips the
+  resource it couldn't read, and still reports everything else — it no longer
+  aborts the whole run. A summary warning at the end lists what was skipped.
+- **The `resources` check runs on live pods**, while the probe / tag / replica
+  checks run on workload templates. A misconfigured Deployment can therefore
+  appear both as a `Pod` finding (from its running pod) and as a `Deployment`
+  finding — that's expected, not a duplicate.
 - Orphaned-PVC detection checks pod volume references only; PVCs referenced
   only by not-yet-scheduled Jobs/CronJobs may show as false positives.
 - Doesn't inspect `Jobs`/`CronJobs` pod templates for probes (they don't use

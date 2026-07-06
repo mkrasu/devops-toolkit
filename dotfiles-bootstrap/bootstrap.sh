@@ -27,10 +27,21 @@
 #
 set -euo pipefail
 
+# Require Bash 4+ (we use `mapfile`). macOS ships 3.2 as /bin/bash, so Mac
+# users need a newer bash — `brew install bash` — and to run this with it.
+if ((BASH_VERSINFO[0] < 4)); then
+    echo "Error: this script needs Bash 4+ (you have ${BASH_VERSION}). On macOS: brew install bash." >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Dotfiles live in dotfiles/ and the per-OS package lists in packages/,
+# both alongside this script.
 DOTFILES_DIR="${SCRIPT_DIR}/dotfiles"
 PACKAGES_DIR="${SCRIPT_DIR}/packages"
 BACKUP_DIR="${HOME}/.dotfiles_backup/$(date +%Y%m%d-%H%M%S)"
+
+VALID_OSES="debian fedora arch macos"
 
 DRY_RUN=false
 ASSUME_YES=false
@@ -50,7 +61,7 @@ warn()  { echo -e "${YELLOW}  !${NC} $*"; }
 die()   { echo -e "${RED}Error:${NC} $*" >&2; exit 1; }
 
 usage() {
-    sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '4,26p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -68,6 +79,10 @@ while [[ $# -gt 0 ]]; do
         *) die "Unknown option: $1 (use --help for usage)" ;;
     esac
 done
+
+if [[ -n "$OS_OVERRIDE" && " $VALID_OSES " != *" $OS_OVERRIDE "* ]]; then
+    die "Unknown --os value '$OS_OVERRIDE'. Valid: ${VALID_OSES// /, }."
+fi
 
 # ---------------------------------------------------------------------------
 # OS detection
@@ -163,10 +178,12 @@ link_dotfiles() {
     [[ -d "$DOTFILES_DIR" ]] || die "Dotfiles directory not found: $DOTFILES_DIR"
 
     local files
+    # Every file in dotfiles/ is a dotfile to link (they're all hidden '.' files).
     files=$(find "$DOTFILES_DIR" -maxdepth 1 -type f -name '.*')
     [[ -n "$files" ]] || { warn "No dotfiles found in $DOTFILES_DIR, skipping."; return; }
 
     local backed_up=false
+    local n_linked=0 n_backed=0 n_skipped=0
 
     while IFS= read -r src; do
         local name target
@@ -175,6 +192,7 @@ link_dotfiles() {
 
         if [[ -L "$target" && "$(readlink "$target")" == "$src" ]]; then
             ok "$name already linked, skipping."
+            ((n_skipped++)) || true
             continue
         fi
 
@@ -187,6 +205,7 @@ link_dotfiles() {
                 backed_up=true
                 warn "Backed up existing $target -> $BACKUP_DIR/$name"
             fi
+            ((n_backed++)) || true
         fi
 
         if [[ "$DRY_RUN" == true ]]; then
@@ -195,11 +214,13 @@ link_dotfiles() {
             ln -s "$src" "$target"
             ok "Linked $name"
         fi
+        ((n_linked++)) || true
     done <<< "$files"
 
     if [[ "$backed_up" == true ]]; then
         info "Existing dotfiles backed up to: $BACKUP_DIR"
     fi
+    info "Dotfiles: ${n_linked} linked, ${n_backed} backed up, ${n_skipped} already correct."
 }
 
 # ---------------------------------------------------------------------------
@@ -229,6 +250,11 @@ if [[ "$SKIP_DOTFILES" == false ]]; then
 else
     warn "Skipping dotfile linking (--skip-dotfiles)."
 fi
+
+# Tidy up: drop the timestamped backup dir (and its parent) if nothing landed
+# there, so repeated clean runs don't litter ~/.dotfiles_backup.
+rmdir "$BACKUP_DIR" 2>/dev/null || true
+rmdir "${HOME}/.dotfiles_backup" 2>/dev/null || true
 
 if [[ "$DRY_RUN" == true ]]; then
     echo -e "${YELLOW}Dry run complete. Nothing was changed.${NC}"

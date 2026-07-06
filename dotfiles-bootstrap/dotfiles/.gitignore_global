@@ -1,0 +1,31 @@
+# ~/.gitignore_global — patterns to ignore in every repo, linked by bootstrap.sh
+# Referenced from .gitconfig via core.excludesfile = ~/.gitignore_global.
+# Keep this for machine/editor cruft, not project-specific ignores.
+
+# OS junk
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-workspace
+
+# Env / secrets you never want to commit by accident
+.env
+.env.local
+*.pem
+
+# Build / dependency dirs that slip in
+.venv/
+__pycache__/
+node_modules/

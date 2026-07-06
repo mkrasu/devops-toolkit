@@ -26,8 +26,13 @@ a single box or small project.
 - `--dry-run` — see what would alert without sending anything
 - `--test FILE` — replay a historical log file against your patterns to
   validate them before deploying
-- `--once` — process new lines and exit, for cron-based execution instead
-  of a long-running process
+- `--once` — process only what's new since the last run and exit, tracking each
+  file's position (inode + offset) on disk so cron runs don't miss or re-read
+  lines
+- Per-notifier severity floor (`min_severity`) — e.g. page Slack on `high`
+  only while email gets everything
+- Notifier calls retry with backoff, so a transient webhook/SMTP blip doesn't
+  silently drop an alert
 - Secrets kept out of the config file via `${ENV_VAR}` substitution
 - Zero dependencies — Python 3 standard library only
 
@@ -108,6 +113,20 @@ A full working example is included as `example.config.json`.
 | `window_seconds` | Rolling window for counting matches |
 | `cooldown_seconds` | Minimum time between alerts for this pattern, once fired |
 
+### Notifier fields
+
+Each notifier is keyed by type (`slack`, `discord`, `webhook`, `email`) and
+takes its own settings (webhook URL, SMTP details, etc.). Two options apply to
+any notifier:
+
+| Field | Meaning |
+|---|---|
+| `enabled` | Set `false` to keep the config but stop sending (default: `true`) |
+| `min_severity` | Only send alerts at this severity or higher (`low`/`medium`/`high`). Omit to receive all. E.g. Slack `high`, email unset. |
+
+Notifier calls (HTTP and SMTP) retry a couple of times with a short backoff, so
+a transient failure logs a warning instead of silently dropping the alert.
+
 ### Secrets
 
 Never put webhook URLs or SMTP passwords directly in the config file if
@@ -130,10 +149,11 @@ clear error rather than silently sending to a broken URL.
 | Mode | Behavior |
 |---|---|
 | (default) | Follows file(s) live, like `tail -f`, alerting as thresholds trip |
-| `--once` | Reads whatever is currently new, then exits — good for cron |
+| `--once` | Reads only lines added since the last `--once` run, then exits — good for cron. Tracks each file's position on disk. |
 | `--test FILE` | Replays a whole file from the start, prints a summary, exits |
 | `--dry-run` | Prints what would alert without calling any notifier |
-| `--from-start` | In live mode, read existing content instead of only new lines |
+| `--from-start` | Read existing content instead of only new lines (live mode, or the first `--once` run) |
+| `--state-dir DIR` | Where `--once` stores per-file position state (default: `$XDG_CACHE_HOME/log-alert` or `~/.cache/log-alert`) |
 
 ## Running it continuously
 
@@ -157,15 +177,20 @@ WantedBy=multi-user.target
 ### Cron (--once mode)
 
 ```cron
-* * * * * SLACK_WEBHOOK_URL=... /usr/bin/python3 /opt/scripts/log-alert.py --config /etc/log-alert/config.json --once --from-start >> /var/log/log-alert.log 2>&1
+* * * * * SLACK_WEBHOOK_URL=... /usr/bin/python3 /opt/scripts/log-alert.py --config /etc/log-alert/config.json --once >> /var/log/log-alert.log 2>&1
 ```
 
-Note: `--once --from-start` on a growing file will re-read from the
-beginning every run unless you point it at something that's effectively
-"only new content" (e.g. `journalctl --since -1min`, piped via `--file -`).
-For a plain append-only file, prefer running it as a long-lived process
-(systemd) instead of `--once` in cron, so it tracks its own file position
-between runs.
+`--once` remembers where it stopped last time. On each run it seeks to the
+saved offset for each file and processes only what's new, then records the new
+position — so a plain append-only log works fine in cron without re-scanning
+the whole file or missing lines between runs. It handles rotation too: if the
+file's inode changes or it shrinks (truncation), the next run reads from the
+top of the new file.
+
+The first run on a file establishes a baseline at end-of-file and alerts on
+nothing (add `--from-start` if you want that first run to scan existing
+content). State lives under `~/.cache/log-alert/` by default; point it
+elsewhere with `--state-dir` or a `"state_dir"` key in the config.
 
 ## Adding a custom notifier
 

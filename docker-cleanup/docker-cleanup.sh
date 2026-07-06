@@ -4,8 +4,8 @@
 # docker-cleanup.sh
 #
 # Safely prune unused Docker resources (containers, images, volumes, networks,
-# build cache) older than a configurable age, with dry-run support and a
-# summary report. Designed to be run manually or via cron/systemd timer.
+# build cache) older than a configurable age, with a real dry-run preview and
+# a summary of space reclaimed. Designed to be run manually or via cron/systemd.
 #
 # Usage:
 #   ./docker-cleanup.sh [OPTIONS]
@@ -18,6 +18,7 @@
 #   -i, --images          Also prune unused (not just dangling) images
 #   -b, --build-cache     Also prune builder cache
 #   -a, --all              Shorthand for -v -i -b
+#   -j, --json             Print a machine-readable JSON summary (implies --quiet)
 #   -l, --log FILE        Write a summary log to FILE (default: none)
 #   -q, --quiet            Suppress non-essential output
 #   -h, --help              Show this help message
@@ -26,6 +27,7 @@
 #   ./docker-cleanup.sh --dry-run
 #   ./docker-cleanup.sh --days 14 --all --yes
 #   ./docker-cleanup.sh -a -y -l /var/log/docker-cleanup.log
+#   ./docker-cleanup.sh --dry-run --json    # preview as JSON, for tooling
 #
 set -euo pipefail
 
@@ -38,6 +40,7 @@ ASSUME_YES=false
 PRUNE_VOLUMES=false
 PRUNE_IMAGES=false
 PRUNE_BUILD_CACHE=false
+JSON=false
 LOG_FILE=""
 QUIET=false
 
@@ -72,7 +75,7 @@ require_docker() {
 }
 
 usage() {
-    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '4,30p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -80,6 +83,18 @@ human_bytes() {
     # Convert a raw byte count into a human-readable string (best-effort).
     local bytes="${1:-0}"
     numfmt --to=iec --suffix=B "$bytes" 2>/dev/null || echo "${bytes}B"
+}
+
+size_to_bytes() {
+    # Parse a Docker "human" size (e.g. "1.5GB", "512kB", "0B") to bytes.
+    # Docker uses base-1000 units, so map onto numfmt --from=si. Best-effort:
+    # anything unparseable yields 0 so the summary never crashes a run.
+    local s="${1:-0}"
+    s="${s//[[:space:]]/}"
+    s="${s%B}"                          # drop trailing 'B' (GB -> G, kB -> k)
+    s="$(echo "$s" | tr 'a-z' 'A-Z')"   # numfmt SI wants uppercase (K/M/G)
+    [[ -z "$s" ]] && { echo 0; return; }
+    numfmt --from=si "$s" 2>/dev/null || echo 0
 }
 
 # ---------------------------------------------------------------------------
@@ -117,6 +132,11 @@ while [[ $# -gt 0 ]]; do
             PRUNE_BUILD_CACHE=true
             shift
             ;;
+        -j|--json)
+            JSON=true
+            QUIET=true
+            shift
+            ;;
         -l|--log)
             LOG_FILE="${2:?--log requires a file path}"
             shift 2
@@ -138,17 +158,64 @@ done
 
 require_docker
 
-FILTER="until=${DAYS}h"
 # Docker's --filter until= expects a duration or timestamp; convert days to hours.
 FILTER_HOURS=$(( DAYS * 24 ))
 FILTER="until=${FILTER_HOURS}h"
 
+# Running totals for the summary.
+TOTAL_RECLAIMED=0
+declare -a ACTIONS_JSON=()
+
 # ---------------------------------------------------------------------------
-# Pre-flight report: what does the system look like right now?
+# Dry-run preview: list candidate resources instead of pruning.
+#
+# Note: Docker's prune `until=` filter (a relative age) can't be reproduced
+# exactly by `docker ... ls`, so the preview lists current candidates and the
+# real run additionally drops anything newer than the age threshold. This is a
+# genuine preview of *what kind of thing* would go, not a byte-exact promise.
+# ---------------------------------------------------------------------------
+preview() {
+    local desc="$1"; shift
+    log "${GREEN}->${NC} ${desc}"
+    local out
+    if out="$("$@" 2>/dev/null)"; then
+        if [[ -n "$out" ]]; then
+            while IFS= read -r line; do log "     $line"; done <<< "$out"
+        else
+            log "     (nothing matches right now)"
+        fi
+    else
+        log "     (could not list — this Docker version may not support the filter)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Execute a prune, capture reclaimed space, add it to the running total.
+# ---------------------------------------------------------------------------
+do_prune() {
+    local action="$1" desc="$2"; shift 2
+    log "${GREEN}->${NC} ${desc}"
+    local out reclaimed bytes
+    # Capture output so one failing prune (pipefail) doesn't abort the whole
+    # run before the summary; surface a warning instead.
+    if ! out="$("$@" -f 2>&1)"; then
+        log "   ${YELLOW}warning: '${action}' prune reported an error:${NC}"
+        while IFS= read -r line; do log "     $line"; done <<< "$out"
+        ACTIONS_JSON+=("{\"action\":\"${action}\",\"reclaimed_bytes\":0,\"error\":true}")
+        return 0
+    fi
+    [[ -n "$out" ]] && while IFS= read -r line; do log "   $line"; done <<< "$out"
+    reclaimed="$(echo "$out" | sed -n 's/.*Total reclaimed space: *//p' | tail -n1)"
+    bytes="$(size_to_bytes "${reclaimed:-0}")"
+    TOTAL_RECLAIMED=$(( TOTAL_RECLAIMED + bytes ))
+    ACTIONS_JSON+=("{\"action\":\"${action}\",\"reclaimed_bytes\":${bytes},\"error\":false}")
+}
+
+# ---------------------------------------------------------------------------
+# Pre-flight report
 # ---------------------------------------------------------------------------
 log "${BLUE}== Docker disk usage (before) ==${NC}"
-BEFORE_DF=$(docker system df)
-log "$BEFORE_DF"
+log "$(docker system df)"
 log ""
 
 log "${BLUE}== Cleanup plan ==${NC}"
@@ -164,69 +231,82 @@ if [[ "$DRY_RUN" == false && "$ASSUME_YES" == false ]]; then
     [[ "$confirm" =~ ^[Yy]$ ]] || { log "Aborted by user."; exit 0; }
 fi
 
-DRY_FLAG=""
-if [[ "$DRY_RUN" == true ]]; then
-    DRY_FLAG="--dry-run"
-fi
-
-run() {
-    local desc="$1"; shift
-    log "${GREEN}->${NC} ${desc}"
-    if [[ "$DRY_RUN" == true ]]; then
-        # docker prune supports --dry-run natively on recent versions;
-        # fall back to just printing the command if unsupported.
-        if "$@" --dry-run >/tmp/docker-cleanup-out 2>&1; then
-            cat /tmp/docker-cleanup-out | while read -r line; do log "   $line"; done
-        else
-            log "   (dry-run not supported by this Docker version for this command; skipping actual call)"
-            log "   Would run: $*"
-        fi
-    else
-        "$@" -f 2>&1 | while read -r line; do log "   $line"; done
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # 1. Stopped containers older than threshold
 # ---------------------------------------------------------------------------
-run "Removing stopped containers older than ${DAYS}d..." \
-    docker container prune --filter "$FILTER"
+if [[ "$DRY_RUN" == true ]]; then
+    preview "Stopped containers that would be removed:" \
+        docker container ls -a --filter "status=exited" --filter "status=created" \
+        --format '{{.ID}}  {{.Image}}  {{.Status}}'
+else
+    do_prune "containers" "Removing stopped containers older than ${DAYS}d..." \
+        docker container prune --filter "$FILTER"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. Dangling images (always safe: untagged, unreferenced layers)
 # ---------------------------------------------------------------------------
-run "Removing dangling images older than ${DAYS}d..." \
-    docker image prune --filter "$FILTER"
+if [[ "$DRY_RUN" == true ]]; then
+    preview "Dangling images that would be removed:" \
+        docker image ls --filter "dangling=true" \
+        --format '{{.ID}}  {{.Repository}}:{{.Tag}}  {{.Size}}'
+else
+    do_prune "dangling-images" "Removing dangling images older than ${DAYS}d..." \
+        docker image prune --filter "$FILTER"
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Unused (not just dangling) images  -- opt-in, more aggressive
 # ---------------------------------------------------------------------------
 if [[ "$PRUNE_IMAGES" == true ]]; then
-    run "Removing ALL unused images older than ${DAYS}d..." \
-        docker image prune --all --filter "$FILTER"
+    if [[ "$DRY_RUN" == true ]]; then
+        preview "All unused images that would be removed (aggressive):" \
+            docker image ls --format '{{.ID}}  {{.Repository}}:{{.Tag}}  {{.Size}}'
+    else
+        do_prune "unused-images" "Removing ALL unused images older than ${DAYS}d..." \
+            docker image prune --all --filter "$FILTER"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
 # 4. Unused networks
 # ---------------------------------------------------------------------------
-run "Removing unused networks older than ${DAYS}d..." \
-    docker network prune --filter "$FILTER"
+if [[ "$DRY_RUN" == true ]]; then
+    preview "Custom networks (unused ones would be removed):" \
+        docker network ls --filter "type=custom" \
+        --format '{{.ID}}  {{.Name}}  {{.Driver}}'
+else
+    do_prune "networks" "Removing unused networks older than ${DAYS}d..." \
+        docker network prune --filter "$FILTER"
+fi
 
 # ---------------------------------------------------------------------------
 # 5. Dangling volumes -- opt-in, DESTRUCTIVE (can delete data)
+# Note: `docker volume prune` has no age filter, so --days does NOT apply here.
 # ---------------------------------------------------------------------------
 if [[ "$PRUNE_VOLUMES" == true ]]; then
     log "${YELLOW}Warning: pruning volumes can permanently delete data not referenced by a running container.${NC}"
-    run "Removing dangling volumes..." \
-        docker volume prune
+    log "${YELLOW}Note: the age filter (--days) does not apply to volumes; Docker prunes all dangling ones.${NC}"
+    if [[ "$DRY_RUN" == true ]]; then
+        preview "Dangling volumes that would be removed:" \
+            docker volume ls --filter "dangling=true" --format '{{.Name}}  ({{.Driver}})'
+    else
+        do_prune "volumes" "Removing dangling volumes..." \
+            docker volume prune
+    fi
 fi
 
 # ---------------------------------------------------------------------------
 # 6. Builder cache -- opt-in
 # ---------------------------------------------------------------------------
 if [[ "$PRUNE_BUILD_CACHE" == true ]]; then
-    run "Removing build cache older than ${DAYS}d..." \
-        docker builder prune --filter "$FILTER"
+    if [[ "$DRY_RUN" == true ]]; then
+        preview "Build cache usage (older records would be removed):" \
+            docker builder du
+    else
+        do_prune "build-cache" "Removing build cache older than ${DAYS}d..." \
+            docker builder prune --filter "$FILTER"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -234,16 +314,25 @@ fi
 # ---------------------------------------------------------------------------
 log ""
 log "${BLUE}== Docker disk usage (after) ==${NC}"
-AFTER_DF=$(docker system df)
-log "$AFTER_DF"
-
+log "$(docker system df)"
 log ""
+
 if [[ "$DRY_RUN" == true ]]; then
     log "${YELLOW}Dry run complete. No resources were actually removed.${NC}"
 else
-    log "${GREEN}Cleanup complete.${NC}"
+    log "${GREEN}Cleanup complete.${NC} Reclaimed approximately $(human_bytes "$TOTAL_RECLAIMED")."
 fi
 
 if [[ -n "$LOG_FILE" ]]; then
     log "Log written to: $LOG_FILE"
+fi
+
+# ---------------------------------------------------------------------------
+# JSON summary (machine-readable) — printed to stdout when --json is set,
+# even under --quiet, so it composes with other tooling.
+# ---------------------------------------------------------------------------
+if [[ "$JSON" == true ]]; then
+    actions_joined="$(IFS=,; echo "${ACTIONS_JSON[*]:-}")"
+    printf '{"dry_run":%s,"days":%s,"total_reclaimed_bytes":%s,"total_reclaimed_human":"%s","actions":[%s]}\n' \
+        "$DRY_RUN" "$DAYS" "$TOTAL_RECLAIMED" "$(human_bytes "$TOTAL_RECLAIMED")" "$actions_joined"
 fi
