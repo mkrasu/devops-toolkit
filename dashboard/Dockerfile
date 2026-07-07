@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py store.py db.py ./
+COPY app.py store.py db.py notify.py ./
 COPY templates/ templates/
 COPY static/ static/
 

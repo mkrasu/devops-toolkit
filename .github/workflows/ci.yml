@@ -46,7 +46,7 @@ jobs:
       - name: Install dashboard dependencies
         run: pip install -r dashboard/requirements.txt httpx
       - name: Run tests (including the FastAPI app tests)
-        run: python -m unittest tests.test_dashboard_store tests.test_dashboard_db tests.test_dashboard_app -v
+        run: python -m unittest tests.test_dashboard_store tests.test_dashboard_db tests.test_dashboard_notify tests.test_dashboard_app -v
       - name: Build Docker image
         run: docker build -t devops-dashboard dashboard/
       - name: Smoke test the container (file import + HTTP ingest)

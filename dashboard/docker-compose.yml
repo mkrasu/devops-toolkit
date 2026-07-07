@@ -16,6 +16,10 @@ services:
       #   DASHBOARD_TOKENS="web1:s3cret,db1:0th3r"  ("*" = any host)
       # Leave unset to keep ingest disabled.
       - DASHBOARD_TOKENS=${DASHBOARD_TOKENS:-}
+      # Notifications for tiles turning crit/stale (and recovering).
+      # Set one or both to enable; leave unset for a silent dashboard.
+      - DASHBOARD_NOTIFY_SLACK=${DASHBOARD_NOTIFY_SLACK:-}
+      - DASHBOARD_NOTIFY_WEBHOOK=${DASHBOARD_NOTIFY_WEBHOOK:-}
     restart: unless-stopped
 
 volumes:

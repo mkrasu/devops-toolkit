@@ -108,6 +108,15 @@ class DashboardAppTest(unittest.TestCase):
         # web1's token must not let anyone write results for remote1
         self.assertEqual(self._post("remote1", "sys-triage", SEV_OK, "sekrit").status_code, 401)
 
+    def test_ingest_rejects_malformed_host_and_tool_names(self):
+        for host, tool in (("evil!", "sys-triage"), ("web1", "a b"),
+                           ("-leading", "sys-triage"), ("x" * 65, "sys-triage")):
+            resp = self.client.post(
+                f"/api/v1/ingest/{host}/{tool}", json=SEV_OK,
+                headers={"Authorization": "Bearer r3mote"},
+            )
+            self.assertEqual(resp.status_code, 400, (host, tool))
+
     def test_ingest_rejects_invalid_json(self):
         resp = self.client.post(
             "/api/v1/ingest/remote1/sys-triage", content=b"{not json",

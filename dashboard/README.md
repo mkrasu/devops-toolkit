@@ -2,8 +2,11 @@
 
 A read-only web dashboard over the toolkit: scheduled collectors run the
 tools with JSON output, the dashboard renders red/green tiles per host and
-tool with drill-down into findings and history. Open it in the morning,
+tool with drill-down into findings, history, and trends — and notifies you
+when a tile turns red or a collector goes silent. Open it in the morning,
 see everything green (or not), get on with your day.
+
+![The dashboard grid: one card per host, one status tile per tool](docs/screenshot.png)
 
 > **The dependency exception.** Every *tool* in this repo is standard
 > library only. The dashboard is a separate deployable and uses FastAPI +
@@ -96,6 +99,7 @@ per-host subdirectories cleanly and gets imported on the next page load).
 | Data directory (host side, compose) | `DASHBOARD_DATA` env var when running `docker compose up` | `/var/lib/devops-dashboard` |
 | SQLite database path | `DASHBOARD_DB` env var | `/db/dashboard.sqlite3` (named volume in compose) |
 | Ingest tokens | `DASHBOARD_TOKENS` env var (`host:token,...`, `*` = any host) or `DASHBOARD_TOKENS_FILE` (one per line) | unset — ingest disabled |
+| State-change notifications | `DASHBOARD_NOTIFY_SLACK` / `DASHBOARD_NOTIFY_WEBHOOK` env vars | unset — notifications disabled |
 | History kept per host/tool (database) | `keep` in `db.py` | 1000 |
 | Results kept per tool (file mode) | `collect.sh --keep N` | 200 |
 | Staleness budget | per tool in `store.py` (`STALE_AFTER`) | 15 min for endpoint-watchdog, 26 h otherwise |
@@ -110,6 +114,31 @@ per-host subdirectories cleanly and gets imported on the next page load).
 | `/api/v1/summary` | The whole grid as JSON (for scripting/alerting) |
 | `/api/v1/series/{host}/{tool}` | Chart points as JSON (what the trend chart renders) |
 | `/healthz` | Container health check |
+
+## Notifications
+
+The dashboard is the only component that can notice a **silent** collector:
+a dead cron on a monitored host produces no failing run and no alert from
+the tools themselves — just a tile quietly going stale. A background sweep
+(every 60 s) watches every tile and sends one message per state change
+involving `crit` or `stale`, including the recovery:
+
+```
+[CRIT] web1/sys-triage: 2 high / 1 medium / 0 low (was ok)
+[STALE] db1/db-backup-rotate: no results arriving — is the collector still running? (was ok)
+[RECOVERED] web1/sys-triage: 0 high / 0 medium / 1 low (was crit)
+```
+
+Enable it by setting one or both destinations (unset = silent dashboard):
+
+| Env var | Destination |
+|---|---|
+| `DASHBOARD_NOTIFY_SLACK` | Slack-compatible incoming webhook (Slack, Mattermost, Discord's `/slack` endpoint) — gets the text above |
+| `DASHBOARD_NOTIFY_WEBHOOK` | Any URL — gets the transition as JSON (`host`, `tool`, `previous`, `current`, `headline`, `text`) |
+
+`warn`-level wobbles are tracked but never notified — pages are for things
+that need a human. `ok -> warn -> crit` notifies once, at the `crit` step,
+with `previous: warn`.
 
 ## Security posture
 

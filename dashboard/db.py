@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS results (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_results_host_tool_ts ON results(host, tool, ts);
 CREATE INDEX IF NOT EXISTS ix_results_lookup ON results(host, tool, created_at DESC);
+CREATE TABLE IF NOT EXISTS notify_state (
+    host TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    status TEXT NOT NULL,          -- last status we notified about (or baselined)
+    PRIMARY KEY (host, tool)
+);
 """
 
 DEFAULT_KEEP = 1000   # rows kept per host/tool
@@ -223,6 +229,49 @@ def import_from_dir(db_path: str, data_dir: str) -> int:
                 if insert_result(db_path, host, tool, ts, payload, created_at=mtime):
                     imported += 1
     return imported
+
+
+# ---------------------------------------------------------------------------
+# Notification transitions: compare each tile's current effective status
+# against the last one we notified about. "stale" counts as its own status —
+# the dashboard is the only component that can notice a silent collector.
+# ---------------------------------------------------------------------------
+
+NOTIFY_RANK = {"ok": 0, "unknown": 1, "warn": 2, "crit": 3, "stale": 3}
+
+
+def effective_status(state: store.ToolState) -> str:
+    return "stale" if state.stale else state.status
+
+
+def notify_transitions(db_path: str, now: float | None = None) -> list[dict]:
+    """Tiles whose effective status changed since the last check, filtered to
+    transitions worth waking someone for: either side is crit/stale. Updates
+    the stored notify state for every tile, so each change fires once.
+    A tile never seen before counts as previously 'ok' — a brand-new broken
+    tile alerts, a brand-new healthy one stays silent."""
+    transitions = []
+    states = [s for group in latest_states(db_path, now).values() for s in group]
+    with connect(db_path) as conn:
+        for s in states:
+            current = effective_status(s)
+            row = conn.execute(
+                "SELECT status FROM notify_state WHERE host = ? AND tool = ?",
+                (s.host, s.tool),
+            ).fetchone()
+            previous = row["status"] if row else "ok"
+            if current != previous:
+                conn.execute(
+                    "INSERT OR REPLACE INTO notify_state (host, tool, status) VALUES (?, ?, ?)",
+                    (s.host, s.tool, current),
+                )
+                if max(NOTIFY_RANK[current], NOTIFY_RANK[previous]) >= NOTIFY_RANK["crit"]:
+                    transitions.append({
+                        "host": s.host, "tool": s.tool,
+                        "previous": previous, "current": current,
+                        "headline": s.headline, "timestamp": s.timestamp,
+                    })
+    return transitions
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,8 @@ Configuration (env):
     DASHBOARD_DB         SQLite path (default /db/dashboard.sqlite3)
     DASHBOARD_TOKENS     ingest tokens, "host:token,host2:token2" ("*" = any host)
     DASHBOARD_TOKENS_FILE  same format, one per line — takes precedence
+    DASHBOARD_NOTIFY_SLACK    Slack-compatible webhook for tile state changes
+    DASHBOARD_NOTIFY_WEBHOOK  generic JSON webhook for tile state changes
 
 Run locally:
     DASHBOARD_DATA_DIR=./data DASHBOARD_DB=./dashboard.sqlite3 uvicorn app:app --reload
@@ -20,8 +22,11 @@ Run locally:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
+import re
 import time
 
 from fastapi import FastAPI, HTTPException, Request
@@ -30,11 +35,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import db
+import notify
 import store
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 IMPORT_INTERVAL = 30          # seconds between directory-import sweeps
 MAX_INGEST_BYTES = 1_000_000  # a tool report should be far smaller
+
+# Hostnames and tool names become database keys and UI labels; keep them sane.
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def load_tokens() -> dict[str, str]:
@@ -48,8 +57,37 @@ def load_tokens() -> dict[str, str]:
     return db.parse_tokens(os.environ.get("DASHBOARD_TOKENS", ""))
 
 
-def create_app(data_dir: str, db_path: str, tokens: dict[str, str] | None = None) -> FastAPI:
-    app = FastAPI(title="devops-toolkit dashboard", docs_url=None, redoc_url=None)
+def create_app(data_dir: str, db_path: str, tokens: dict[str, str] | None = None,
+               notify_slack: str | None = None, notify_webhook: str | None = None,
+               notify_interval: float = 60.0) -> FastAPI:
+
+    async def notify_loop() -> None:
+        """Periodically sweep for tile state changes and send notifications.
+        This is what catches a collector going silent (stale) even when
+        nobody has the dashboard open."""
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                await loop.run_in_executor(
+                    None, notify.check_and_notify, db_path, data_dir, notify_slack, notify_webhook,
+                )
+            except Exception as e:  # never let one bad sweep kill the loop
+                print(f"notify loop error: {e}", flush=True)
+            await asyncio.sleep(notify_interval)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        task = None
+        if notify_slack or notify_webhook:
+            task = asyncio.create_task(notify_loop())
+        yield
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title="devops-toolkit dashboard", docs_url=None, redoc_url=None,
+                  lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
     templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
     templates.env.filters["age"] = store.format_age
@@ -102,6 +140,10 @@ def create_app(data_dir: str, db_path: str, tokens: dict[str, str] | None = None
         if not ingest_tokens:
             raise HTTPException(status_code=503,
                                 detail="Ingest is disabled: no DASHBOARD_TOKENS configured.")
+        if not NAME_RE.match(host) or not NAME_RE.match(tool):
+            raise HTTPException(status_code=400,
+                                detail="host and tool must be 1-64 chars of [A-Za-z0-9._-], "
+                                       "starting alphanumeric.")
         auth = request.headers.get("authorization", "")
         presented = auth[7:] if auth.lower().startswith("bearer ") else ""
         if not db.token_allows(ingest_tokens, host, presented):
@@ -147,7 +189,8 @@ def create_app(data_dir: str, db_path: str, tokens: dict[str, str] | None = None
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "db": db_path, "data_dir": data_dir,
-                "ingest_enabled": bool(ingest_tokens)}
+                "ingest_enabled": bool(ingest_tokens),
+                "notify_enabled": bool(notify_slack or notify_webhook)}
 
     return app
 
@@ -155,4 +198,6 @@ def create_app(data_dir: str, db_path: str, tokens: dict[str, str] | None = None
 app = create_app(
     data_dir=os.environ.get("DASHBOARD_DATA_DIR", "/data"),
     db_path=os.environ.get("DASHBOARD_DB", "/db/dashboard.sqlite3"),
+    notify_slack=os.environ.get("DASHBOARD_NOTIFY_SLACK"),
+    notify_webhook=os.environ.get("DASHBOARD_NOTIFY_WEBHOOK"),
 )

@@ -32,7 +32,8 @@ UI on top: collectors deliver each tool's JSON output (local files, or a
 token-authenticated HTTP ingest API from remote hosts), and a small FastAPI
 app keeps history in SQLite and renders red/green tiles per host with
 drill-down into findings, history, and trend charts — the "is everything
-green this morning?" view. It ships as a Docker image and never executes
+green this morning?" view. It notifies (Slack/webhook) when a tile turns
+red or a collector goes silent, ships as a Docker image, and never executes
 anything itself.
 
 It's also the one deliberate exception to the rules below: the *tools*
