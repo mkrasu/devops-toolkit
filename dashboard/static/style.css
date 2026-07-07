@@ -47,6 +47,11 @@ main { padding: 20px 24px 40px; max-width: 1200px; margin: 0 auto; }
 .history th, .history td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 .history th { color: var(--dim); font-weight: 600; }
 
+.chart-box {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px; height: 280px; margin: 8px 0 24px;
+}
+
 .payload {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   padding: 14px; overflow-x: auto; font-size: 13px;

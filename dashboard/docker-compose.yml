@@ -5,8 +5,22 @@ services:
     ports:
       - "127.0.0.1:8080:8080"   # bind to localhost; expose via reverse proxy/VPN
     volumes:
-      # Collectors write here (collect.sh); the dashboard only reads.
-      # Override the host path per environment, e.g.:
+      # File collectors write here (collect.sh); the dashboard only reads it
+      # and imports new results into its database. Override per environment:
       #   DASHBOARD_DATA=$HOME/dashdata docker compose up -d
       - ${DASHBOARD_DATA:-/var/lib/devops-dashboard}:/data:ro
+      # Result history lives in SQLite on a named volume.
+      - dashboard-db:/db
+    environment:
+      # Per-host bearer tokens for the HTTP ingest API, e.g.
+      #   DASHBOARD_TOKENS="web1:s3cret,db1:0th3r"  ("*" = any host)
+      # Leave unset to keep ingest disabled.
+      - DASHBOARD_TOKENS=${DASHBOARD_TOKENS:-}
+      # Notifications for tiles turning crit/stale (and recovering).
+      # Set one or both to enable; leave unset for a silent dashboard.
+      - DASHBOARD_NOTIFY_SLACK=${DASHBOARD_NOTIFY_SLACK:-}
+      - DASHBOARD_NOTIFY_WEBHOOK=${DASHBOARD_NOTIFY_WEBHOOK:-}
     restart: unless-stopped
+
+volumes:
+  dashboard-db:

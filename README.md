@@ -28,10 +28,13 @@ on each other. If you only want one, copy that folder out and use it on its own.
 ## Dashboard
 
 The tools are CLI-first, but [dashboard/](./dashboard) adds a read-only web
-UI on top: cron/systemd collectors store each tool's JSON output, and a
-small FastAPI app renders red/green tiles per host with drill-down into
-findings and history — the "is everything green this morning?" view.
-It ships as a Docker image and never executes anything itself.
+UI on top: collectors deliver each tool's JSON output (local files, or a
+token-authenticated HTTP ingest API from remote hosts), and a small FastAPI
+app keeps history in SQLite and renders red/green tiles per host with
+drill-down into findings, history, and trend charts — the "is everything
+green this morning?" view. It notifies (Slack/webhook) when a tile turns
+red or a collector goes silent, ships as a Docker image, and never executes
+anything itself.
 
 It's also the one deliberate exception to the rules below: the *tools*
 stay standard-library only; the dashboard is a separate deployable with
