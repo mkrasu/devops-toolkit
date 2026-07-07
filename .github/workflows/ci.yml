@@ -64,13 +64,13 @@ jobs:
         run: |
           python3 db-backup-rotate/db-backup.py \
             --engine postgres --database shop --host localhost --user postgres \
-            --backup-dir /tmp/backups --verify restore
+            --backup-dir /tmp/backups --verify restore --no-rotate
       - name: Second backup, JSON summary is valid JSON
         run: |
           sleep 1
           python3 db-backup-rotate/db-backup.py \
             --engine postgres --database shop --host localhost --user postgres \
-            --backup-dir /tmp/backups --verify restore --json | python3 -m json.tool
+            --backup-dir /tmp/backups --verify restore --no-rotate --json | python3 -m json.tool
       - name: Rotation dry run deletes nothing, tight retention deletes one
         run: |
           test "$(ls /tmp/backups/shop-*.sql.gz | wc -l)" -eq 2

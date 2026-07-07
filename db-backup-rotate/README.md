@@ -138,6 +138,12 @@ file can satisfy several rules at once. With nightly backups that settles
 at roughly 13–15 files. The newest backup is always kept, regardless of
 settings, and files not created by this tool are never deleted.
 
+Note that "newest of each day" means exactly that: if you back up several
+times a day, each run's rotation deletes the earlier same-day backups (the
+same way `restic`/`borg` `--keep-daily` behaves). If you take intraday
+backups you want to keep until day's end, run with `--no-rotate` and do the
+pruning in a separate scheduled `--rotate-only` run.
+
 ## Running from cron
 
 ```cron
