@@ -23,6 +23,7 @@ on each other. If you only want one, copy that folder out and use it on its own.
 | [db-backup-rotate](./db-backup-rotate) | Dumps Postgres/MySQL, verifies the backup (up to a full restore into a scratch DB), rotates with daily/weekly/monthly retention, optionally uploads to S3 | Python 3 |
 | [endpoint-watchdog](./endpoint-watchdog) | Checks HTTP endpoints and TCP ports — status, latency, TLS cert expiry — and alerts on state changes only: one message when it breaks, one when it recovers | Python 3 |
 | [sys-triage](./sys-triage) | One-pass Linux performance triage: samples /proc and flags what's abnormal — CPU steal, memory pressure, OOM kills, disk/inode/IO saturation, TCP retransmits | Python 3 |
+| [host-hardening-check](./host-hardening-check) | Read-only Linux security auditor: SSH config, accounts, sudo grants, wildcard listeners, firewall presence, risky sysctls, world-writable files, patching | Python 3 |
 
 ## How they're built
 
@@ -71,8 +72,11 @@ devops-toolkit/
 │   ├── watchdog.py
 │   ├── example.config.json
 │   └── README.md
-└── sys-triage/
-    ├── triage.py
+├── sys-triage/
+│   ├── triage.py
+│   └── README.md
+└── host-hardening-check/
+    ├── hardening-check.py
     └── README.md
 ```
 
