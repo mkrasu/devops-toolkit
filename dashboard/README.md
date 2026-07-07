@@ -40,6 +40,8 @@ cd dashboard
 
 # 1. Start the dashboard (serves on localhost:8080, reads /var/lib/devops-dashboard)
 docker compose up -d
+#    ...or read results from somewhere else, e.g. for a local test:
+# DASHBOARD_DATA=$HOME/dashdata docker compose up -d
 
 # 2. On each monitored host, schedule collectors — e.g. in crontab:
 */5 * * * *  /opt/devops-toolkit/dashboard/collect.sh /var/lib/devops-dashboard endpoint-watchdog -- python3 /opt/devops-toolkit/endpoint-watchdog/watchdog.py --config /etc/endpoint-watchdog/config.json --output json
@@ -72,7 +74,8 @@ In phase 1 the dashboard reads a local directory, so:
 
 | Setting | How | Default |
 |---|---|---|
-| Data directory | `DASHBOARD_DATA_DIR` env var | `/data` (the compose file mounts `/var/lib/devops-dashboard` there) |
+| Data directory (in the container) | `DASHBOARD_DATA_DIR` env var | `/data` |
+| Data directory (host side, compose) | `DASHBOARD_DATA` env var when running `docker compose up` | `/var/lib/devops-dashboard` |
 | Results kept per tool | `collect.sh --keep N` | 200 |
 | Staleness budget | per tool in `store.py` (`STALE_AFTER`) | 15 min for endpoint-watchdog, 26 h otherwise |
 

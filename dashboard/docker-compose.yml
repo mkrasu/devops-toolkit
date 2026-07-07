@@ -6,5 +6,7 @@ services:
       - "127.0.0.1:8080:8080"   # bind to localhost; expose via reverse proxy/VPN
     volumes:
       # Collectors write here (collect.sh); the dashboard only reads.
-      - /var/lib/devops-dashboard:/data:ro
+      # Override the host path per environment, e.g.:
+      #   DASHBOARD_DATA=$HOME/dashdata docker compose up -d
+      - ${DASHBOARD_DATA:-/var/lib/devops-dashboard}:/data:ro
     restart: unless-stopped
