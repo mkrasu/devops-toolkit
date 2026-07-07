@@ -20,6 +20,7 @@ on each other. If you only want one, copy that folder out and use it on its own.
 | [k8s-resource-auditor](./k8s-resource-auditor) | Read-only pass over a cluster that flags pods with no resource limits, workloads with no readiness probes, and PVCs nothing is using | Python 3 |
 | [log-tailer-alert](./log-tailer-alert) | Follows log files (or stdin), matches regex patterns, and alerts to Slack/Discord/webhook/email once a pattern trips a threshold | Python 3 |
 | [dotfiles-bootstrap](./dotfiles-bootstrap) | Sets up a new dev box: installs my usual CLI tools and symlinks starter dotfiles, backing up anything already there | Bash |
+| [db-backup-rotate](./db-backup-rotate) | Dumps Postgres/MySQL, verifies the backup (up to a full restore into a scratch DB), rotates with daily/weekly/monthly retention, optionally uploads to S3 | Python 3 |
 
 ## How they're built
 
@@ -56,10 +57,13 @@ devops-toolkit/
 │   ├── log-alert.py
 │   ├── example.config.json
 │   └── README.md
-└── dotfiles-bootstrap/
-    ├── bootstrap.sh
-    ├── dotfiles/                # .bashrc .gitconfig .gitignore_global .vimrc .tmux.conf
-    ├── packages/                # apt.txt dnf.txt pacman.txt brew.txt
+├── dotfiles-bootstrap/
+│   ├── bootstrap.sh
+│   ├── dotfiles/                # .bashrc .gitconfig .gitignore_global .vimrc .tmux.conf
+│   ├── packages/                # apt.txt dnf.txt pacman.txt brew.txt
+│   └── README.md
+└── db-backup-rotate/
+    ├── db-backup.py
     └── README.md
 ```
 
@@ -79,8 +83,8 @@ cat README.md
 Things I'll probably add when I hit the need again:
 
 - GitHub Actions templates for the stacks I use most
-- A database backup + rotation script with S3 upload and a restore check
-- A simple uptime/health-check dashboard for a list of endpoints
+- A simple uptime/health-check dashboard for a list of endpoints, with
+  TLS certificate expiry warnings
 
 ## Contributing
 

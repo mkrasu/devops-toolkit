@@ -34,6 +34,55 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -v
 
+  backup-restore:
+    name: db-backup end-to-end (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: ci-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Seed a database
+        run: |
+          createdb -h localhost -U postgres shop
+          psql -h localhost -U postgres -d shop -c "
+            CREATE TABLE orders (id serial PRIMARY KEY, item text NOT NULL);
+            INSERT INTO orders (item) SELECT 'widget-' || g FROM generate_series(1, 1000) g;"
+      - name: Backup with full restore check
+        run: |
+          python3 db-backup-rotate/db-backup.py \
+            --engine postgres --database shop --host localhost --user postgres \
+            --backup-dir /tmp/backups --verify restore
+      - name: Second backup, JSON summary is valid JSON
+        run: |
+          sleep 1
+          python3 db-backup-rotate/db-backup.py \
+            --engine postgres --database shop --host localhost --user postgres \
+            --backup-dir /tmp/backups --verify restore --json | python3 -m json.tool
+      - name: Rotation dry run deletes nothing, tight retention deletes one
+        run: |
+          test "$(ls /tmp/backups/shop-*.sql.gz | wc -l)" -eq 2
+          python3 db-backup-rotate/db-backup.py \
+            --engine postgres --database shop --backup-dir /tmp/backups \
+            --rotate-only --dry-run --keep-daily 1 --keep-weekly 0 --keep-monthly 0
+          test "$(ls /tmp/backups/shop-*.sql.gz | wc -l)" -eq 2
+          python3 db-backup-rotate/db-backup.py \
+            --engine postgres --database shop --backup-dir /tmp/backups \
+            --rotate-only --keep-daily 1 --keep-weekly 0 --keep-monthly 0
+          test "$(ls /tmp/backups/shop-*.sql.gz | wc -l)" -eq 1
+
   smoke:
     name: Dry-run smoke tests
     runs-on: ubuntu-latest
