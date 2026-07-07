@@ -100,6 +100,11 @@ jobs:
           python3 log-tailer-alert/log-alert.py --config log-tailer-alert/example.config.json --test /tmp/sample.log
       - name: k8s-audit help
         run: python3 k8s-resource-auditor/k8s-audit.py --help
+      - name: host-hardening-check live run on the runner
+        run: |
+          sudo python3 host-hardening-check/hardening-check.py
+          sudo python3 host-hardening-check/hardening-check.py --output json | python3 -m json.tool > /dev/null
+          python3 host-hardening-check/hardening-check.py --checks ssh,kernel,patching
       - name: sys-triage live run on the runner
         run: |
           python3 sys-triage/triage.py --interval 1
