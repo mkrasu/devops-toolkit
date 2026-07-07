@@ -8,12 +8,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py store.py ./
+COPY app.py store.py db.py ./
 COPY templates/ templates/
 COPY static/ static/
 
+# /db holds the SQLite database; /data (optional, read-only) is imported.
+RUN mkdir /db && chown dashboard:dashboard /db
 USER dashboard
 ENV DASHBOARD_DATA_DIR=/data
+ENV DASHBOARD_DB=/db/dashboard.sqlite3
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s \

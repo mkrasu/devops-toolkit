@@ -11,6 +11,48 @@
   {{ state.headline }} &middot; collected {{ state.timestamp | ts }} ({{ state.age_seconds | age }})
 </p>
 
+{% if series | length > 1 %}
+<h3>Trend</h3>
+<div class="chart-box"><canvas id="trend"></canvas></div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+  const points = {{ series | tojson }};
+  const labels = points.map(p => p.t);
+  const KEY_STYLE = {
+    high:  {color: "#f85149"}, medium: {color: "#d29922"}, low: {color: "#58a6ff"},
+    fail:  {color: "#f85149"}, warn:   {color: "#d29922"}, ok:  {color: "#3fb950"},
+    avg_latency_ms: {color: "#a371f7", axis: "y1", label: "avg latency (ms)"},
+    size_mib: {color: "#58a6ff", label: "backup size (MiB)"},
+    verify_ok: {color: "#3fb950", label: "verify passed (1/0)"},
+  };
+  const keys = [...new Set(points.flatMap(p => Object.keys(p)))].filter(k => k !== "t");
+  const datasets = keys.map(k => {
+    const s = KEY_STYLE[k] || {color: "#7d8794"};
+    return {
+      label: s.label || k, data: points.map(p => p[k] ?? null),
+      borderColor: s.color, backgroundColor: s.color,
+      yAxisID: s.axis || "y", tension: 0.2, pointRadius: 2, spanGaps: true,
+    };
+  });
+  const useY1 = datasets.some(d => d.yAxisID === "y1");
+  new Chart(document.getElementById("trend"), {
+    type: "line",
+    data: {labels, datasets},
+    options: {
+      maintainAspectRatio: false,
+      color: "#d8dee6",
+      scales: {
+        x: {ticks: {color: "#7d8794", maxTicksLimit: 10}, grid: {color: "#2b3240"}},
+        y: {beginAtZero: true, ticks: {color: "#7d8794"}, grid: {color: "#2b3240"}},
+        ...(useY1 ? {y1: {position: "right", beginAtZero: true,
+                          ticks: {color: "#7d8794"}, grid: {drawOnChartArea: false}}} : {}),
+      },
+      plugins: {legend: {labels: {color: "#d8dee6"}}},
+    },
+  });
+</script>
+{% endif %}
+
 <h3>History</h3>
 <table class="history">
   <tr><th>When</th><th>Status</th><th>Summary</th></tr>

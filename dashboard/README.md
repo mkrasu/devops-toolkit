@@ -13,20 +13,29 @@ see everything green (or not), get on with your day.
 ## How it works
 
 ```
-each monitored host                                  anywhere
-─────────────────────────                            ────────────────────────
-cron / systemd timer                                 docker container
-  └─ collect.sh runs a tool ──► <data-dir>/<host>/<tool>/<ts>.json ──► dashboard (read-only)
+each monitored host                                     anywhere
+─────────────────────────                               ─────────────────────────
+cron / systemd timer                                    docker container
+  └─ collect.sh runs a tool ──┬─► local/shared file ──► imported ─┐
+                              └─► POST /api/v1/ingest (token) ────┼─► SQLite ─► web UI
+                                                                  ─┘  history    trends
 ```
 
 - **Collectors** are just the tools you already run, wrapped in
-  [collect.sh](./collect.sh), which stores each run's JSON as
-  `<data-dir>/<hostname>/<tool>/<YYYYmmdd-HHMMSS>.json` and prunes old
-  results.
-- **The dashboard never executes anything.** It scans the data directory,
-  derives a status per tile (`ok` / `warn` / `crit` / `unknown`), marks
-  tiles **stale** when results stop arriving (so a dead cron looks broken,
-  not green), and auto-refreshes via htmx every 60 s.
+  [collect.sh](./collect.sh). Two delivery modes:
+  - **file mode** — writes `<data-dir>/<hostname>/<tool>/<ts>.json`
+    (same box, NFS, or rsync); the dashboard imports new files
+    automatically
+  - **post mode** (`--post URL --token T`) — remote hosts POST results
+    straight to the ingest API with a per-host bearer token; no shared
+    filesystem needed
+- **History lives in SQLite** (a named Docker volume), which powers the
+  per-tool trend charts: finding counts over time, endpoint latency,
+  backup size.
+- **The dashboard never executes anything.** It derives a status per tile
+  (`ok` / `warn` / `crit` / `unknown`), marks tiles **stale** when results
+  stop arriving (so a dead cron looks broken, not green), and
+  auto-refreshes via htmx every 60 s.
 - Tools understood out of the box: `sys-triage`, `host-hardening-check`,
   `k8s-resource-auditor`, `endpoint-watchdog`, `db-backup-rotate`,
   `docker-cleanup`. Anything else that follows the
@@ -61,14 +70,23 @@ DASHBOARD_DATA_DIR=/var/lib/devops-dashboard uvicorn app:app --port 8080
 
 ### One host vs. many
 
-In phase 1 the dashboard reads a local directory, so:
+- **Single host**: run the container on the same box, use file-mode
+  collectors; done.
+- **Multiple hosts**: give each host a token and use post mode — no shared
+  filesystem required:
 
-- **Single host**: run the container on the same box; done.
-- **Multiple hosts**: ship each host's results into the dashboard's data
-  directory with whatever you already trust — an NFS mount, `rsync` over
-  ssh after each collect, or a shared volume. Results are per-host
-  subdirectories, so they merge cleanly. (A push-over-HTTP ingest API with
-  tokens is the planned phase 2.)
+```bash
+# on the dashboard box: one token per host ("*" would be a shared token)
+DASHBOARD_TOKENS="web1:$(openssl rand -hex 24),db1:$(openssl rand -hex 24)" docker compose up -d
+
+# on each monitored host (crontab), post instead of writing files:
+0 * * * * /opt/devops-toolkit/dashboard/collect.sh --post https://dash.internal:8080 --token "$(cat /etc/dashboard.token)" sys-triage -- python3 /opt/devops-toolkit/sys-triage/triage.py --output json
+```
+
+A host's token only lets it write results **for its own hostname** — a
+compromised web server can't overwrite your database host's green tiles.
+File mode still works too (NFS/rsync into the data directory merges
+per-host subdirectories cleanly and gets imported on the next page load).
 
 ## Configuration
 
@@ -76,7 +94,10 @@ In phase 1 the dashboard reads a local directory, so:
 |---|---|---|
 | Data directory (in the container) | `DASHBOARD_DATA_DIR` env var | `/data` |
 | Data directory (host side, compose) | `DASHBOARD_DATA` env var when running `docker compose up` | `/var/lib/devops-dashboard` |
-| Results kept per tool | `collect.sh --keep N` | 200 |
+| SQLite database path | `DASHBOARD_DB` env var | `/db/dashboard.sqlite3` (named volume in compose) |
+| Ingest tokens | `DASHBOARD_TOKENS` env var (`host:token,...`, `*` = any host) or `DASHBOARD_TOKENS_FILE` (one per line) | unset — ingest disabled |
+| History kept per host/tool (database) | `keep` in `db.py` | 1000 |
+| Results kept per tool (file mode) | `collect.sh --keep N` | 200 |
 | Staleness budget | per tool in `store.py` (`STALE_AFTER`) | 15 min for endpoint-watchdog, 26 h otherwise |
 
 ## Endpoints
@@ -84,8 +105,10 @@ In phase 1 the dashboard reads a local directory, so:
 | Path | What |
 |---|---|
 | `/` | The tile grid, auto-refreshing |
-| `/host/{host}/{tool}` | Latest result, status history, raw JSON |
+| `/host/{host}/{tool}` | Latest result, trend chart, status history, raw JSON |
+| `POST /api/v1/ingest/{host}/{tool}` | Store a result (bearer token; body = the tool's JSON output) |
 | `/api/v1/summary` | The whole grid as JSON (for scripting/alerting) |
+| `/api/v1/series/{host}/{tool}` | Chart points as JSON (what the trend chart renders) |
 | `/healthz` | Container health check |
 
 ## Security posture
@@ -101,18 +124,17 @@ In phase 1 the dashboard reads a local directory, so:
 
 ## Testing
 
-- `tests/test_dashboard_store.py` — the scanning/status logic; stdlib-only,
-  runs with the repo's normal suite.
-- `tests/test_dashboard_app.py` — FastAPI routes via TestClient; skips
-  itself unless the web dependencies are installed, so the toolkit's
-  dependency-free workflow is unaffected. CI runs it with deps installed
-  and also builds and smoke-tests the Docker image.
+- `tests/test_dashboard_store.py` and `tests/test_dashboard_db.py` — the
+  parsing/status logic and the SQLite store; stdlib-only, run with the
+  repo's normal suite.
+- `tests/test_dashboard_app.py` — FastAPI routes (pages, ingest auth,
+  series API) via TestClient; skips itself unless the web dependencies are
+  installed, so the toolkit's dependency-free workflow is unaffected. CI
+  runs it with deps installed, builds the Docker image, and smoke-tests
+  the running container including a real token-authenticated ingest.
 
 ## Roadmap
 
-- **Phase 2**: HTTP ingest endpoint with per-host bearer tokens (no shared
-  filesystem needed), SQLite history, trend charts (endpoint latency, disk
-  creep, finding counts over time).
 - **Phase 3 (maybe)**: gated "run now" via an allowlisted job queue — only
   if scheduled runs ever feel insufficient.
 
