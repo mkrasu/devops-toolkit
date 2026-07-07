@@ -13,6 +13,7 @@ break anything today but cause pain later:
 Bonus checks (on by default, easy to disable):
   - Containers missing liveness probes
   - Containers using the `:latest` image tag
+  - Pinned images with imagePullPolicy: Always
   - Deployments running with a single replica
 
 No external Python dependencies — only the standard library and a working
@@ -242,7 +243,7 @@ def check_readiness_probes(workloads: list[tuple[str, dict]]) -> list[Finding]:
             if "readinessProbe" not in c:
                 findings.append(Finding(
                     severity="medium",
-                    check="readiness-probe",
+                    check="readiness-probes",
                     kind=kind,
                     namespace=ns,
                     name=name,
@@ -262,7 +263,7 @@ def check_liveness_probes(workloads: list[tuple[str, dict]]) -> list[Finding]:
             if "livenessProbe" not in c:
                 findings.append(Finding(
                     severity="low",
-                    check="liveness-probe",
+                    check="liveness-probes",
                     kind=kind,
                     namespace=ns,
                     name=name,
@@ -362,7 +363,7 @@ def check_orphaned_pvcs(pods: list[dict], pvcs: list[dict]) -> list[Finding]:
             severity = "high" if phase == "Bound" else "medium"
             findings.append(Finding(
                 severity=severity,
-                check="orphaned-pvc",
+                check="orphaned-pvcs",
                 kind="PVC",
                 namespace=ns,
                 name=name,

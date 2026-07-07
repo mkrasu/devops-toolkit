@@ -72,6 +72,40 @@ chmod +x docker-cleanup.sh
 | `-q, --quiet` | Suppress non-essential console output |
 | `-h, --help` | Show usage |
 
+## Sample output
+
+A `--dry-run` on a dev box that hasn't been cleaned in a while:
+
+```
+== Docker disk usage (before) ==
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          24        3         6.817GB   5.104GB (74%)
+Containers      5         1         48.66MB   48.64MB (99%)
+Local Volumes   12        2         1.263GB   988.1MB (78%)
+Build Cache     89        0         3.421GB   3.421GB
+
+== Cleanup plan ==
+  Age threshold : 7 day(s) (older than this will be removed)
+  Dry run       : true
+  Prune volumes : false  (destructive if volumes hold data you need)
+  Prune images  : false
+  Prune builder cache : false
+
+-> Stopped containers that would be removed:
+     3f9c2d81a2bc  myapp:test   Exited (1) 12 days ago
+     87ab01c44d0e  postgres:16  Exited (0) 3 weeks ago
+-> Dangling images that would be removed:
+     51ba8befcd21  <none>:<none>  412MB
+     0e2f11c09a77  <none>:<none>  1.02GB
+-> Custom networks (unused ones would be removed):
+     b1194f0dbe2f  myapp_default  bridge
+
+Dry run complete. No resources were actually removed.
+```
+
+The real run prints the same plan, asks for confirmation (unless `--yes`),
+shows Docker's per-prune output, and ends with a reclaimed-space total.
+
 ## Running on a schedule
 
 ### Cron

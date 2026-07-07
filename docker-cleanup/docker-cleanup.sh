@@ -75,7 +75,10 @@ require_docker() {
 }
 
 usage() {
-    sed -n '4,30p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the header comment block (everything between the shebang and the
+    # first non-comment line), minus the SPDX tag — survives header edits
+    # without hardcoded line numbers.
+    awk 'NR == 1 || /^# SPDX/ { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
     exit 0
 }
 
@@ -92,7 +95,7 @@ size_to_bytes() {
     local s="${1:-0}"
     s="${s//[[:space:]]/}"
     s="${s%B}"                          # drop trailing 'B' (GB -> G, kB -> k)
-    s="$(echo "$s" | tr 'a-z' 'A-Z')"   # numfmt SI wants uppercase (K/M/G)
+    s="$(echo "$s" | tr '[:lower:]' '[:upper:]')"   # numfmt SI wants uppercase (K/M/G)
     [[ -z "$s" ]] && { echo 0; return; }
     numfmt --from=si "$s" 2>/dev/null || echo 0
 }
@@ -260,7 +263,8 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$PRUNE_IMAGES" == true ]]; then
     if [[ "$DRY_RUN" == true ]]; then
-        preview "All unused images that would be removed (aggressive):" \
+        log "   (images in use by a container, or newer than ${DAYS}d, will survive the real run)"
+        preview "All images currently present (unused ones would be removed):" \
             docker image ls --format '{{.ID}}  {{.Repository}}:{{.Tag}}  {{.Size}}'
     else
         do_prune "unused-images" "Removing ALL unused images older than ${DAYS}d..." \

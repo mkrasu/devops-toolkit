@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shell:
+    name: Shell lint (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: |
+          bash -n docker-cleanup/docker-cleanup.sh
+          bash -n dotfiles-bootstrap/bootstrap.sh
+      - name: shellcheck
+        run: shellcheck docker-cleanup/docker-cleanup.sh dotfiles-bootstrap/bootstrap.sh
+
+  python:
+    name: Python lint + tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: ruff
+        uses: astral-sh/ruff-action@v3
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+  smoke:
+    name: Dry-run smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker-cleanup dry run
+        run: ./docker-cleanup/docker-cleanup.sh --dry-run --all
+      - name: docker-cleanup JSON summary is valid JSON
+        run: ./docker-cleanup/docker-cleanup.sh --dry-run --json | python3 -m json.tool
+      - name: bootstrap dry run
+        run: ./dotfiles-bootstrap/bootstrap.sh --dry-run
+      - name: log-alert pattern replay
+        run: |
+          printf 'GET /api HTTP 500 \nOut of memory: killed process 1234\n' > /tmp/sample.log
+          python3 log-tailer-alert/log-alert.py --config log-tailer-alert/example.config.json --test /tmp/sample.log
+      - name: k8s-audit help
+        run: python3 k8s-resource-auditor/k8s-audit.py --help

@@ -61,7 +61,10 @@ warn()  { echo -e "${YELLOW}  !${NC} $*"; }
 die()   { echo -e "${RED}Error:${NC} $*" >&2; exit 1; }
 
 usage() {
-    sed -n '4,26p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the header comment block (everything between the shebang and the
+    # first non-comment line), minus the SPDX tag — survives header edits
+    # without hardcoded line numbers.
+    awk 'NR == 1 || /^# SPDX/ { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
     exit 0
 }
 

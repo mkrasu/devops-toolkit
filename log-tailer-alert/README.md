@@ -28,11 +28,13 @@ a single box or small project.
   validate them before deploying
 - `--once` — process only what's new since the last run and exit, tracking each
   file's position (inode + offset) on disk so cron runs don't miss or re-read
-  lines
+  lines. Pattern hit counts and cooldowns persist across runs too, so a
+  "5 hits in an hour" threshold can trip even when the hits span several runs
 - Per-notifier severity floor (`min_severity`) — e.g. page Slack on `high`
   only while email gets everything
 - Notifier calls retry with backoff, so a transient webhook/SMTP blip doesn't
-  silently drop an alert
+  silently drop an alert — and in live mode they run on a separate thread, so
+  a slow webhook never stalls log tailing
 - Secrets kept out of the config file via `${ENV_VAR}` substitution
 - Zero dependencies — Python 3 standard library only
 
@@ -54,6 +56,16 @@ python3 log-alert.py --config example.config.json --dry-run
 
 # 3. Once you trust it, run for real
 python3 log-alert.py --config example.config.json
+```
+
+An alert looks like this on the console (and the same text goes to
+Slack/Discord/email):
+
+```
+[HIGH] 'http-5xx' matched 3x in 60s (source: /var/log/app.log)
+  > 10.0.4.7 - - [07/Jul/2026:09:14:58] "GET /api/checkout HTTP/1.1" 502 0
+  > 10.0.4.9 - - [07/Jul/2026:09:14:59] "POST /api/pay HTTP/1.1" 500 173
+  > 10.0.4.7 - - [07/Jul/2026:09:15:01] "GET /api/checkout HTTP/1.1" 502 0
 ```
 
 ## Config format
@@ -142,7 +154,9 @@ python3 log-alert.py --config config.json
 ```
 
 If a referenced variable isn't set, the script exits immediately with a
-clear error rather than silently sending to a broken URL.
+clear error rather than silently sending to a broken URL. Notifiers with
+`"enabled": false` are exempt — their variables don't need to exist, so you
+can `--test` a config without production secrets on hand.
 
 ## Modes
 
@@ -191,6 +205,11 @@ The first run on a file establishes a baseline at end-of-file and alerts on
 nothing (add `--from-start` if you want that first run to scan existing
 content). State lives under `~/.cache/log-alert/` by default; point it
 elsewhere with `--state-dir` or a `"state_dir"` key in the config.
+
+Pattern state persists between `--once` runs as well (in `patterns.json` in
+the state dir): hit timestamps, cooldowns, and recent sample lines all carry
+over, so thresholds behave the same whether the tool runs continuously or
+once a minute from cron.
 
 ## Adding a custom notifier
 

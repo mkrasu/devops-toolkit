@@ -1,0 +1,6 @@
+# Normalize line endings in the repo; anything that executes on Linux must
+# check out as LF even on Windows (CRLF in a shebang line breaks bash).
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+dotfiles-bootstrap/dotfiles/* text eol=lf

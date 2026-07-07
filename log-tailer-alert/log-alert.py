@@ -115,6 +115,15 @@ def load_config(path: str) -> dict:
         die(f"Config file not found: {path}")
     except json.JSONDecodeError as e:
         die(f"Config file is not valid JSON: {e}")
+    # Drop disabled notifiers before ${ENV_VAR} substitution — a notifier
+    # you've switched off shouldn't require its secrets to be set just to
+    # run --test or --dry-run.
+    notifiers = raw.get("notifiers")
+    if isinstance(notifiers, dict):
+        raw["notifiers"] = {
+            name: cfg for name, cfg in notifiers.items()
+            if not isinstance(cfg, dict) or cfg.get("enabled", True)
+        }
     return substitute_env(raw)
 
 
@@ -178,6 +187,28 @@ class Pattern:
         # Require a fresh set of hits before this pattern can alert again
         self._hits.clear()
         return alert
+
+    def export_state(self) -> dict:
+        """Snapshot hit history so --once runs can accumulate thresholds
+        across separate invocations (e.g. cron every minute)."""
+        return {
+            "hits": list(self._hits),
+            "last_alert": self._last_alert,
+            "samples": list(self._sample_lines),
+        }
+
+    def restore_state(self, state: dict, now: float) -> None:
+        cutoff = now - self.window_seconds
+        self._hits.extend(
+            t for t in state.get("hits", [])
+            if isinstance(t, (int, float)) and t >= cutoff
+        )
+        last_alert = state.get("last_alert", 0.0)
+        if isinstance(last_alert, (int, float)):
+            self._last_alert = float(last_alert)
+        for s in state.get("samples", []):
+            if isinstance(s, str):
+                self._sample_lines.append(s)
 
 
 @dataclass
@@ -272,14 +303,13 @@ NOTIFIER_DISPATCH = {
 }
 
 
-def dispatch_alert(alert: Alert, notifiers_cfg: dict, dry_run: bool) -> None:
-    banner = colorize(alert.text(), alert.severity)
-    print(banner)
-
+def print_alert(alert: Alert, dry_run: bool) -> None:
+    print(colorize(alert.text(), alert.severity))
     if dry_run:
         print(colorize("  [DRY RUN] no notifications sent", alert.severity))
-        return
 
+
+def send_notifications(alert: Alert, notifiers_cfg: dict) -> None:
     for name, cfg in notifiers_cfg.items():
         if not cfg.get("enabled", True):
             continue
@@ -293,6 +323,25 @@ def dispatch_alert(alert: Alert, notifiers_cfg: dict, dry_run: bool) -> None:
             log(f"Unknown notifier in config: {name}")
             continue
         fn(cfg, alert)
+
+
+def dispatch_alert(alert: Alert, notifiers_cfg: dict, dry_run: bool) -> None:
+    print_alert(alert, dry_run)
+    if not dry_run:
+        send_notifications(alert, notifiers_cfg)
+
+
+def notifier_worker(alert_queue: Queue, notifiers_cfg: dict, stop_event: threading.Event) -> None:
+    """Send notifications off the tail loop, so a slow webhook or SMTP retry
+    (seconds of backoff) can't stall line processing in live mode."""
+    while True:
+        try:
+            alert = alert_queue.get(timeout=0.5)
+        except Empty:
+            if stop_event.is_set():
+                return
+            continue
+        send_notifications(alert, notifiers_cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +443,35 @@ def _save_state(state_dir: str, path: str, inode: int, offset: int) -> None:
         log(f"Warning: could not save state for {path}: {e}")
 
 
+def _pattern_state_path(state_dir: str) -> str:
+    return os.path.join(state_dir, "patterns.json")
+
+
+def load_pattern_state(state_dir: str, patterns: list[Pattern]) -> None:
+    """Restore per-pattern hit history saved by a previous --once run, so a
+    threshold like '5 hits in 60s' can trip across cron invocations instead
+    of resetting every run."""
+    try:
+        with open(_pattern_state_path(state_dir), "r", encoding="utf-8") as f:
+            saved = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    now = time.time()
+    for p in patterns:
+        state = saved.get(p.name)
+        if isinstance(state, dict):
+            p.restore_state(state, now)
+
+
+def save_pattern_state(state_dir: str, patterns: list[Pattern]) -> None:
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(_pattern_state_path(state_dir), "w", encoding="utf-8") as f:
+            json.dump({p.name: p.export_state() for p in patterns}, f)
+    except OSError as e:
+        log(f"Warning: could not save pattern state: {e}")
+
+
 def process_once(
     path: str,
     patterns: list[Pattern],
@@ -447,6 +525,7 @@ def run_once(
     from_start: bool,
     state_dir: str,
 ) -> int:
+    load_pattern_state(state_dir, patterns)
     total_lines = 0
     for path in files:
         if path == "-":
@@ -454,6 +533,7 @@ def run_once(
             continue
         lines, _ = process_once(path, patterns, notifiers_cfg, dry_run, from_start, state_dir)
         total_lines += lines
+    save_pattern_state(state_dir, patterns)
     log(f"Processed {total_lines} new line(s) across {len(files)} file(s). Exiting.")
     return 0
 
@@ -517,6 +597,12 @@ def main(argv: list[str]) -> int:
         threads.append(t)
         log(f"Watching {path}")
 
+    alert_queue: Queue = Queue()
+    notifier_thread = threading.Thread(
+        target=notifier_worker, args=(alert_queue, notifiers_cfg, stop_event), daemon=True,
+    )
+    notifier_thread.start()
+
     def handle_sigint(signum, frame):
         log("Shutting down...")
         stop_event.set()
@@ -537,11 +623,17 @@ def main(argv: list[str]) -> int:
             for p in patterns:
                 alert = p.check(line, source, now)
                 if alert:
-                    dispatch_alert(alert, notifiers_cfg, args.dry_run)
+                    print_alert(alert, args.dry_run)
+                    if not args.dry_run:
+                        alert_queue.put(alert)
     except KeyboardInterrupt:
         pass
     finally:
         stop_event.set()
+        # Give the notifier worker a moment to drain queued alerts.
+        notifier_thread.join(timeout=15)
+        if notifier_thread.is_alive():
+            log("Warning: exited with notification(s) still in flight.")
 
     log(f"Processed {processed} line(s). Exiting.")
     return 0

@@ -71,6 +71,31 @@ real package availability there:
 | `--os OS` | Override OS detection: `debian` \| `fedora` \| `arch` \| `macos` |
 | `-h, --help` | Show usage |
 
+## Sample output
+
+Re-running on a machine that already has most things in place:
+
+```
+==> Detected OS: debian
+==> Dry run: false
+
+==> Installing packages...
+==> Installing 13 package(s) for debian: git curl wget vim tmux htop jq ripgrep fzf bat tree unzip build-essential
+  ✓ Packages installed.
+
+==> Linking dotfiles...
+  ✓ .bashrc already linked, skipping.
+  ! Backed up existing /home/you/.vimrc -> /home/you/.dotfiles_backup/20260707-091500/.vimrc
+  ✓ Linked .vimrc
+  ✓ Linked .gitconfig
+  ✓ Linked .gitignore_global
+  ✓ Linked .tmux.conf
+==> Existing dotfiles backed up to: /home/you/.dotfiles_backup/20260707-091500
+==> Dotfiles: 4 linked, 1 backed up, 1 already correct.
+
+Bootstrap complete. Open a new shell (or 'source ~/.bashrc') to pick up changes.
+```
+
 ## What's included
 
 ### Dotfiles (`dotfiles/`)

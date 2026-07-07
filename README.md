@@ -1,5 +1,8 @@
 # devops-toolkit
 
+[![CI](https://github.com/mkrasu/devops-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/mkrasu/devops-toolkit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 Small, self-contained scripts I keep reaching for when I'm doing ops work —
 cleaning up after Docker, sanity-checking a Kubernetes cluster, watching logs,
 or setting up a fresh machine. Nothing fancy and no frameworks; just the things
@@ -30,6 +33,10 @@ A few things I tried to keep consistent across all of them:
 - They behave in scripts and cron: real exit codes, JSON output where it's
   useful, and no surprise prompts when nothing's attached to a terminal.
 - Each one has a README that explains why it exists, not just how to run it.
+- CI runs on every push: `shellcheck` on the shell scripts, `ruff` on the
+  Python, a unit test suite for the Python tools (stdlib `unittest`, in
+  [tests/](./tests)), and dry-run smoke tests of every script. Run the tests
+  locally with `python3 -m unittest discover -s tests`.
 
 ## Layout
 
@@ -37,6 +44,8 @@ A few things I tried to keep consistent across all of them:
 devops-toolkit/
 ├── LICENSE                     # MIT, covers the whole repo
 ├── README.md                   # this file
+├── .github/workflows/ci.yml    # lint + tests + dry-run smoke tests
+├── tests/                      # unit tests for the Python tools
 ├── docker-cleanup/
 │   ├── docker-cleanup.sh
 │   └── README.md
