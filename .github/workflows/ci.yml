@@ -100,3 +100,14 @@ jobs:
           python3 log-tailer-alert/log-alert.py --config log-tailer-alert/example.config.json --test /tmp/sample.log
       - name: k8s-audit help
         run: python3 k8s-resource-auditor/k8s-audit.py --help
+      - name: endpoint-watchdog against a local server
+        run: |
+          python3 -m http.server 8080 --bind 127.0.0.1 &
+          sleep 1
+          python3 endpoint-watchdog/watchdog.py --url http://127.0.0.1:8080/ --no-state
+          python3 endpoint-watchdog/watchdog.py --url http://127.0.0.1:8080/ --no-state --output json | python3 -m json.tool
+          echo "--- negative test: a down endpoint must exit non-zero (FAIL below is expected) ---"
+          if python3 endpoint-watchdog/watchdog.py --url http://127.0.0.1:9/ --timeout 2 --no-state; then
+            echo "BUG: watchdog exited 0 for a down endpoint"; exit 1
+          fi
+          echo "OK: down endpoint correctly exited non-zero"

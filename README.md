@@ -21,6 +21,7 @@ on each other. If you only want one, copy that folder out and use it on its own.
 | [log-tailer-alert](./log-tailer-alert) | Follows log files (or stdin), matches regex patterns, and alerts to Slack/Discord/webhook/email once a pattern trips a threshold | Python 3 |
 | [dotfiles-bootstrap](./dotfiles-bootstrap) | Sets up a new dev box: installs my usual CLI tools and symlinks starter dotfiles, backing up anything already there | Bash |
 | [db-backup-rotate](./db-backup-rotate) | Dumps Postgres/MySQL, verifies the backup (up to a full restore into a scratch DB), rotates with daily/weekly/monthly retention, optionally uploads to S3 | Python 3 |
+| [endpoint-watchdog](./endpoint-watchdog) | Checks HTTP endpoints and TCP ports — status, latency, TLS cert expiry — and alerts on state changes only: one message when it breaks, one when it recovers | Python 3 |
 
 ## How they're built
 
@@ -62,8 +63,12 @@ devops-toolkit/
 │   ├── dotfiles/                # .bashrc .gitconfig .gitignore_global .vimrc .tmux.conf
 │   ├── packages/                # apt.txt dnf.txt pacman.txt brew.txt
 │   └── README.md
-└── db-backup-rotate/
-    ├── db-backup.py
+├── db-backup-rotate/
+│   ├── db-backup.py
+│   └── README.md
+└── endpoint-watchdog/
+    ├── watchdog.py
+    ├── example.config.json
     └── README.md
 ```
 
@@ -83,8 +88,6 @@ cat README.md
 Things I'll probably add when I hit the need again:
 
 - GitHub Actions templates for the stacks I use most
-- A simple uptime/health-check dashboard for a list of endpoints, with
-  TLS certificate expiry warnings
 
 ## Contributing
 

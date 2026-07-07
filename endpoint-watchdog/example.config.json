@@ -1,0 +1,38 @@
+{
+  "defaults": {
+    "timeout_seconds": 10,
+    "warn_latency_ms": 2000,
+    "cert_warn_days": 21
+  },
+  "endpoints": [
+    {
+      "name": "homepage",
+      "url": "https://example.com/",
+      "expect_status": 200
+    },
+    {
+      "name": "api-health",
+      "url": "https://api.example.com/healthz",
+      "expect_status": 200,
+      "expect_body": "\"status\":\"ok\"",
+      "warn_latency_ms": 500
+    },
+    {
+      "name": "postgres",
+      "check": "tcp",
+      "host": "db1.internal",
+      "port": 5432
+    }
+  ],
+  "notifiers": {
+    "slack": {
+      "enabled": false,
+      "min_severity": "high",
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    },
+    "webhook": {
+      "enabled": false,
+      "url": "https://example.com/hooks/endpoint-watchdog"
+    }
+  }
+}
