@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ state.host }} / {{ state.tool }} — dashboard{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/">&larr; all hosts</a></p>
+
+<h2>
+  {{ state.host }} / {{ state.tool }}
+  <span class="badge inline {{ state.status }}">{{ 'STALE' if state.stale else state.status | upper }}</span>
+</h2>
+<p class="meta">
+  {{ state.headline }} &middot; collected {{ state.timestamp | ts }} ({{ state.age_seconds | age }})
+</p>
+
+<h3>History</h3>
+<table class="history">
+  <tr><th>When</th><th>Status</th><th>Summary</th></tr>
+  {% for h in history %}
+  <tr>
+    <td>{{ h.timestamp | ts }}</td>
+    <td><span class="badge inline {{ h.status }}">{{ h.status | upper }}</span></td>
+    <td>{{ h.headline }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h3>Latest result</h3>
+<pre class="payload">{{ pretty_payload }}</pre>
+{% endblock %}

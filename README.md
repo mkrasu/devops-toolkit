@@ -25,6 +25,18 @@ on each other. If you only want one, copy that folder out and use it on its own.
 | [sys-triage](./sys-triage) | One-pass Linux performance triage: samples /proc and flags what's abnormal — CPU steal, memory pressure, OOM kills, disk/inode/IO saturation, TCP retransmits | Python 3 |
 | [host-hardening-check](./host-hardening-check) | Read-only Linux security auditor: SSH config, accounts, sudo grants, wildcard listeners, firewall presence, risky sysctls, world-writable files, patching | Python 3 |
 
+## Dashboard
+
+The tools are CLI-first, but [dashboard/](./dashboard) adds a read-only web
+UI on top: cron/systemd collectors store each tool's JSON output, and a
+small FastAPI app renders red/green tiles per host with drill-down into
+findings and history — the "is everything green this morning?" view.
+It ships as a Docker image and never executes anything itself.
+
+It's also the one deliberate exception to the rules below: the *tools*
+stay standard-library only; the dashboard is a separate deployable with
+its own `requirements.txt`.
+
 ## How they're built
 
 A few things I tried to keep consistent across all of them:
@@ -75,8 +87,15 @@ devops-toolkit/
 ├── sys-triage/
 │   ├── triage.py
 │   └── README.md
-└── host-hardening-check/
-    ├── hardening-check.py
+├── host-hardening-check/
+│   ├── hardening-check.py
+│   └── README.md
+└── dashboard/                   # web UI over the tools' JSON output
+    ├── app.py                   # FastAPI routes (the only non-stdlib code)
+    ├── store.py                 # result scanning/status logic (stdlib)
+    ├── collect.sh               # cron/systemd wrapper that stores results
+    ├── templates/  static/
+    ├── Dockerfile  docker-compose.yml  requirements.txt
     └── README.md
 ```
 
