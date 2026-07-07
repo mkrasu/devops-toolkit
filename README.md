@@ -22,6 +22,7 @@ on each other. If you only want one, copy that folder out and use it on its own.
 | [dotfiles-bootstrap](./dotfiles-bootstrap) | Sets up a new dev box: installs my usual CLI tools and symlinks starter dotfiles, backing up anything already there | Bash |
 | [db-backup-rotate](./db-backup-rotate) | Dumps Postgres/MySQL, verifies the backup (up to a full restore into a scratch DB), rotates with daily/weekly/monthly retention, optionally uploads to S3 | Python 3 |
 | [endpoint-watchdog](./endpoint-watchdog) | Checks HTTP endpoints and TCP ports — status, latency, TLS cert expiry — and alerts on state changes only: one message when it breaks, one when it recovers | Python 3 |
+| [sys-triage](./sys-triage) | One-pass Linux performance triage: samples /proc and flags what's abnormal — CPU steal, memory pressure, OOM kills, disk/inode/IO saturation, TCP retransmits | Python 3 |
 
 ## How they're built
 
@@ -66,9 +67,12 @@ devops-toolkit/
 ├── db-backup-rotate/
 │   ├── db-backup.py
 │   └── README.md
-└── endpoint-watchdog/
-    ├── watchdog.py
-    ├── example.config.json
+├── endpoint-watchdog/
+│   ├── watchdog.py
+│   ├── example.config.json
+│   └── README.md
+└── sys-triage/
+    ├── triage.py
     └── README.md
 ```
 

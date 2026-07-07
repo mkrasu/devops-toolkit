@@ -100,6 +100,10 @@ jobs:
           python3 log-tailer-alert/log-alert.py --config log-tailer-alert/example.config.json --test /tmp/sample.log
       - name: k8s-audit help
         run: python3 k8s-resource-auditor/k8s-audit.py --help
+      - name: sys-triage live run on the runner
+        run: |
+          python3 sys-triage/triage.py --interval 1
+          python3 sys-triage/triage.py --interval 1 --output json | python3 -m json.tool > /dev/null
       - name: endpoint-watchdog against a local server
         run: |
           python3 -m http.server 8080 --bind 127.0.0.1 &
