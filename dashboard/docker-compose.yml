@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+services:
+  dashboard:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"   # bind to localhost; expose via reverse proxy/VPN
+    volumes:
+      # Collectors write here (collect.sh); the dashboard only reads.
+      - /var/lib/devops-dashboard:/data:ro
+    restart: unless-stopped

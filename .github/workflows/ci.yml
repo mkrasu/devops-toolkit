@@ -15,8 +15,9 @@ jobs:
         run: |
           bash -n docker-cleanup/docker-cleanup.sh
           bash -n dotfiles-bootstrap/bootstrap.sh
+          bash -n dashboard/collect.sh
       - name: shellcheck
-        run: shellcheck docker-cleanup/docker-cleanup.sh dotfiles-bootstrap/bootstrap.sh
+        run: shellcheck docker-cleanup/docker-cleanup.sh dotfiles-bootstrap/bootstrap.sh dashboard/collect.sh
 
   python:
     name: Python lint + tests (${{ matrix.python-version }})
@@ -33,6 +34,34 @@ jobs:
         uses: astral-sh/ruff-action@v3
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+
+  dashboard:
+    name: Dashboard (tests + image build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dashboard dependencies
+        run: pip install -r dashboard/requirements.txt httpx
+      - name: Run tests (including the FastAPI app tests)
+        run: python -m unittest tests.test_dashboard_store tests.test_dashboard_app -v
+      - name: Build Docker image
+        run: docker build -t devops-dashboard dashboard/
+      - name: Smoke test the container
+        run: |
+          mkdir -p /tmp/dashdata/ci-host/sys-triage
+          echo '{"summary": {"high": 0, "medium": 1, "low": 2}}' \
+            > /tmp/dashdata/ci-host/sys-triage/20260707-120000.json
+          docker run -d --name dash -p 8080:8080 -v /tmp/dashdata:/data:ro devops-dashboard
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/ | grep -q "ci-host"
+          curl -sf http://127.0.0.1:8080/api/v1/summary | python3 -m json.tool
+          docker rm -f dash
 
   backup-restore:
     name: db-backup end-to-end (PostgreSQL)

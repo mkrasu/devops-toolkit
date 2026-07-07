@@ -1,0 +1,26 @@
+{% if not hosts %}
+<div class="empty">
+  <p>No results yet.</p>
+  <p>Point a collector at this dashboard's data directory, e.g.:</p>
+  <pre>./collect.sh /var/lib/devops-dashboard sys-triage -- python3 sys-triage/triage.py --output json</pre>
+</div>
+{% endif %}
+
+{% for host, states in hosts.items() %}
+<section class="host">
+  <h2>{{ host }}</h2>
+  <div class="tiles">
+    {% for s in states %}
+    <a class="tile {{ s.status }}{% if s.stale %} stale{% endif %}"
+       href="/host/{{ s.host }}/{{ s.tool }}">
+      <div class="tile-head">
+        <span class="tool">{{ s.tool }}</span>
+        <span class="badge">{{ 'STALE' if s.stale else s.status | upper }}</span>
+      </div>
+      <div class="headline">{{ s.headline }}</div>
+      <div class="meta">{{ s.age_seconds | age }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
