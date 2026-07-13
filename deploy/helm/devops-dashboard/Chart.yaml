@@ -1,0 +1,12 @@
+apiVersion: v2
+name: devops-dashboard
+description: >-
+  The devops-toolkit dashboard plus an in-cluster k8s-resource-auditor
+  CronJob — a Kubernetes cluster that audits its own hygiene and reports
+  to a dashboard it hosts itself.
+type: application
+version: 0.1.0
+appVersion: "2.0.0"
+home: https://github.com/mkrasu/devops-toolkit
+sources:
+  - https://github.com/mkrasu/devops-toolkit

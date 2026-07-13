@@ -1,0 +1,32 @@
+# Example values for a local minikube deployment with locally built images.
+#
+#   minikube start
+#   eval $(minikube docker-env)
+#   docker build -t devops-dashboard:local dashboard/
+#   docker build -t devops-toolkit-collector:local -f deploy/collector.Dockerfile .
+#   helm install dash deploy/helm/devops-dashboard -f deploy/minikube-values.yaml \
+#       --set ingest.token="$(openssl rand -hex 16)"
+#
+# See deploy/README.md for the full walkthrough.
+image:
+  repository: devops-dashboard
+  tag: local
+  pullPolicy: Never
+
+audit:
+  image:
+    repository: devops-toolkit-collector
+    tag: local
+    pullPolicy: Never
+
+ingest:
+  host: minikube
+  # Set the token on the command line (--set ingest.token=...) rather than
+  # committing one here.
+
+# Optional: `minikube addons enable ingress`, add "dashboard.local" to /etc/hosts
+# pointing at `minikube ip`, then flip this on. Otherwise use port-forward.
+ingress:
+  enabled: false
+  className: nginx
+  host: dashboard.local
