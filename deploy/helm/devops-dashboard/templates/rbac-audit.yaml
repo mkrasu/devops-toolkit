@@ -1,0 +1,38 @@
+{{- if .Values.audit.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "devops-dashboard.fullname" . }}-audit
+  labels:
+    {{- include "devops-dashboard.labels" . | nindent 4 }}
+---
+# Read-only, exactly the access k8s-resource-auditor documents in its README.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "devops-dashboard.fullname" . }}-audit
+  labels:
+    {{- include "devops-dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "devops-dashboard.fullname" . }}-audit
+  labels:
+    {{- include "devops-dashboard.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "devops-dashboard.fullname" . }}-audit
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "devops-dashboard.fullname" . }}-audit
+    namespace: {{ .Release.Namespace }}
+{{- end }}

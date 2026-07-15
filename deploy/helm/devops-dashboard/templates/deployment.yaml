@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devops-dashboard.fullname" . }}
+  labels:
+    {{- include "devops-dashboard.labels" . | nindent 4 }}
+spec:
+  # Deliberately not HA: the dashboard's state is a local SQLite file.
+  # This shows up as a LOW single-replica finding in our own audit — accepted.
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate   # two pods must never share the SQLite volume
+  selector:
+    matchLabels:
+      {{- include "devops-dashboard.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "devops-dashboard.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Restart the pod when the secret changes
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false   # the app never talks to the API server
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000                        # the SQLite volume must be writable by uid 1000
+      containers:
+        - name: dashboard
+          image: {{ include "devops-dashboard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: {{ include "devops-dashboard.fullname" . }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: db
+              mountPath: /db
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: db
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "devops-dashboard.fullname" . }}-db
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}

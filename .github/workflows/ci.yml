@@ -74,6 +74,47 @@ jobs:
           curl -sf http://127.0.0.1:8080/api/v1/series/ci-remote/host-hardening-check | python3 -m json.tool
           docker rm -f dash
 
+  helm-chart:
+    name: Helm chart (lint + kind install test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint and validate manifests
+        run: |
+          helm lint deploy/helm/devops-dashboard
+          curl -sSLo /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          helm template dash deploy/helm/devops-dashboard | /tmp/kubeconform -strict -summary
+      - name: Create kind cluster
+        run: |
+          curl -sSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.26.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          /tmp/kind create cluster --wait 120s
+      - name: Build and load images
+        run: |
+          docker build -t devops-dashboard:ci dashboard/
+          docker build -t devops-toolkit-collector:ci -f deploy/collector.Dockerfile .
+          /tmp/kind load docker-image devops-dashboard:ci devops-toolkit-collector:ci
+      - name: Install the chart
+        run: helm install dash deploy/helm/devops-dashboard -f deploy/ci/kind-values.yaml --wait --timeout 180s
+      - name: Cluster audits itself and reports to the dashboard
+        run: |
+          kubectl create job --from=cronjob/dashboard-audit audit-now
+          kubectl wait --for=condition=complete job/audit-now --timeout=180s
+          kubectl port-forward svc/dashboard 8080:8080 &
+          sleep 3
+          curl -sf http://127.0.0.1:8080/healthz
+          curl -sf http://127.0.0.1:8080/api/v1/summary | python3 -m json.tool | grep -q "kind-ci"
+          curl -sf http://127.0.0.1:8080/ | grep -q "k8s-resource-auditor"
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A
+          kubectl describe pods
+          kubectl logs -l app.kubernetes.io/name=devops-dashboard --tail=100 || true
+          kubectl logs job/audit-now --tail=100 || true
+
   backup-restore:
     name: db-backup end-to-end (PostgreSQL)
     runs-on: ubuntu-latest

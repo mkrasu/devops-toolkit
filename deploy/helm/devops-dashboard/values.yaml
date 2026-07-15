@@ -1,0 +1,77 @@
+# Default values for devops-dashboard.
+#
+# The chart is written to pass the repo's own k8s-resource-auditor cleanly:
+# resources, probes, and pinned image tags everywhere. The one accepted
+# finding is single-replica (LOW) — the dashboard is deliberately one
+# replica because its state is a local SQLite file.
+
+image:
+  repository: ghcr.io/mkrasu/devops-dashboard
+  # Defaults to the chart's appVersion; override for local builds
+  # (e.g. tag: ci with minikube image load).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  host: dashboard.local
+  annotations: {}
+  tls: []
+
+persistence:
+  # PVC for /db (the SQLite history). With persistence disabled the
+  # history lives in an emptyDir and vanishes with the pod.
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+
+ingest:
+  # The identity the in-cluster collectors report as, and the bearer token
+  # they use. The token is also what DASHBOARD_TOKENS is built from —
+  # override it in a real deployment (helm --set ingest.token=... or a
+  # values file kept out of git).
+  host: minikube
+  token: "change-me"
+  # Extra "host: token" pairs for collectors outside the cluster.
+  extraTokens: {}
+
+notify:
+  # Optional: tile state-change notifications (see dashboard/README.md).
+  slackWebhook: ""
+  genericWebhook: ""
+
+audit:
+  # CronJob running k8s-resource-auditor inside the cluster and POSTing
+  # the report to the dashboard.
+  enabled: true
+  schedule: "*/30 * * * *"
+  image:
+    repository: ghcr.io/mkrasu/devops-toolkit-collector
+    tag: ""            # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+  # Arguments appended to k8s-audit.py (--output json is always set).
+  extraArgs: ["--all-namespaces"]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+fullnameOverride: ""

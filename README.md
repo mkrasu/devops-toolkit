@@ -40,6 +40,12 @@ It's also the one deliberate exception to the rules below: the *tools*
 stay standard-library only; the dashboard is a separate deployable with
 its own `requirements.txt`.
 
+Want it on Kubernetes? [deploy/](./deploy) has a Helm chart that runs the
+dashboard in-cluster together with a CronJob in which the cluster audits
+its own hygiene using k8s-resource-auditor and reports to the dashboard it
+hosts — runnable on minikube in a few commands, install-tested on a kind
+cluster in CI, images published to GHCR.
+
 ## How they're built
 
 A few things I tried to keep consistent across all of them:
@@ -93,12 +99,17 @@ devops-toolkit/
 ├── host-hardening-check/
 │   ├── hardening-check.py
 │   └── README.md
-└── dashboard/                   # web UI over the tools' JSON output
-    ├── app.py                   # FastAPI routes (the only non-stdlib code)
-    ├── store.py                 # result scanning/status logic (stdlib)
-    ├── collect.sh               # cron/systemd wrapper that stores results
-    ├── templates/  static/
-    ├── Dockerfile  docker-compose.yml  requirements.txt
+├── dashboard/                   # web UI over the tools' JSON output
+│   ├── app.py                   # FastAPI routes (the only non-stdlib code)
+│   ├── store.py  db.py  notify.py   # scanning, SQLite history, notifications (stdlib)
+│   ├── collect.sh               # cron/systemd wrapper that delivers results
+│   ├── templates/  static/
+│   ├── Dockerfile  docker-compose.yml  requirements.txt
+│   └── README.md
+└── deploy/                      # the dashboard on Kubernetes
+    ├── helm/devops-dashboard/   # chart: dashboard + self-audit CronJob
+    ├── collector.Dockerfile     # tools + kubectl image for in-cluster collectors
+    ├── minikube-values.yaml  ci/kind-values.yaml
     └── README.md
 ```
 

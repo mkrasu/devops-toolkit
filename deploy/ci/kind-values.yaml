@@ -1,0 +1,25 @@
+# Values for the CI install test on a kind cluster: locally built images
+# (loaded with `kind load docker-image`, hence pullPolicy Never) and a
+# short fullname so the smoke-test kubectl commands stay readable.
+fullnameOverride: dashboard
+
+image:
+  repository: devops-dashboard
+  tag: ci
+  pullPolicy: Never
+
+audit:
+  enabled: true
+  schedule: "*/5 * * * *"
+  image:
+    repository: devops-toolkit-collector
+    tag: ci
+    pullPolicy: Never
+
+ingest:
+  host: kind-ci
+  token: ci-token
+
+persistence:
+  enabled: true
+  size: 100Mi
